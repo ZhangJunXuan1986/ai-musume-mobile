@@ -20,9 +20,8 @@
   --rk:  clamp(56px, 8.6vmin, 78px);          /* 技能圆键直径 */
   --atk: clamp(74px, 11.2vmin, 102px);        /* 普攻大圆直径 */
   --ult: clamp(60px, 9.2vmin, 84px);          /* 奥义金圆直径 */
+  --mini: clamp(48px, 7.2vmin, 64px);         /* 功能小圆（替身/闪避/净化/秘卷） */
   --stick: clamp(116px, 17vmin, 156px);       /* 固定摇杆底盘 */
-  --capw: clamp(76px, 11vmin, 100px);         /* 功能胶囊宽 */
-  --caph: clamp(46px, 6.8vmin, 58px);         /* 功能胶囊高（≥44 触摸底线） */
   --gap: 8px;
   --p1:#56c4ff; --p2:#ff8a60; --gold:#ffd060;
 }
@@ -61,69 +60,77 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#
 #skillbar b{color:var(--gold)}
 
 /* ---- 左下：固定摇杆（底盘不动，只有头跟手指） ---- */
-#pad{position:absolute;z-index:8;
+/* 双保险：按键层高于菜单层，万一将来再出现位置重叠，也优先保证技能能点 */
+#pad{position:absolute;z-index:12;
   left:calc(var(--pad) + env(safe-area-inset-left,0px));
   bottom:calc(var(--pad) + env(safe-area-inset-bottom,0px));
   width:var(--stick);height:var(--stick);border-radius:50%;
   background:radial-gradient(circle at 50% 45%,rgba(30,40,80,.72),rgba(10,14,34,.82));
   border:2px solid rgba(120,170,245,.55);box-shadow:0 0 22px rgba(60,120,220,.22) inset;
   touch-action:none}
-#pad::after{content:"移动";position:absolute;left:0;right:0;bottom:-20px;text-align:center;
-  font-size:11px;color:#9aa4d0}
+/* 提示放圆盘上方：贴底会被手机手势条/地址栏裁掉 */
+#pad::after{content:"左右走位 · 上下换道";position:absolute;left:50%;transform:translateX(-50%);
+  top:-19px;text-align:center;white-space:nowrap;font-size:10px;color:#9aa4d0;
+  text-shadow:0 1px 3px #000;pointer-events:none}
+/* 三道指示器：顶部中央，三个小格分别代表 前/中/后 道 */
+#lanes{position:absolute;left:50%;transform:translateX(-50%);z-index:6;pointer-events:none;
+  top:calc(86px + env(safe-area-inset-top,0px));display:flex;gap:10px;align-items:center;
+  font-size:clamp(9px,1.4vmin,12px);color:#c9d0f5;white-space:nowrap}
+#lanes .lg{display:flex;gap:3px;align-items:center}
+#lanes .lg b{color:#eef0ff;margin-right:4px}
+#lanes i{display:inline-block;width:22px;height:6px;border-radius:3px;background:#333c68;
+  border:1px solid #4a5688}
+#lanes i.on{background:var(--gold);border-color:var(--gold);box-shadow:0 0 6px var(--gold)}
+#lanes .sep{color:#6b74a0}
 #knob{position:absolute;left:50%;top:50%;width:44%;height:44%;border-radius:50%;
   transform:translate(-50%,-50%);background:rgba(110,200,255,.9);
   border:2px solid #e8f6ff;box-shadow:0 0 14px rgba(90,190,255,.6)}
 
-/* ---- 左下摇杆右侧：2×2 功能胶囊（跳 / 闪避 / 净化 / 秘卷） ---- */
-#funcs{position:absolute;z-index:8;display:grid;grid-template-columns:repeat(2,var(--capw));
-  grid-auto-rows:var(--caph);gap:var(--gap);
-  left:calc(var(--pad) * 2 + var(--stick) + env(safe-area-inset-left,0px));
-  bottom:calc(var(--pad) + env(safe-area-inset-bottom,0px))}
-.cap{display:flex;flex-direction:column;align-items:center;justify-content:center;
-  border-radius:14px;border:2px solid rgba(120,150,220,.6);
-  background:rgba(18,24,52,.82);font-size:clamp(12px,1.9vmin,16px);font-weight:700;
-  line-height:1.15;text-align:center;touch-action:none;color:#eef0ff}
-.cap small{font-size:clamp(9px,1.3vmin,12px);color:#ffd060;font-weight:600}
-.cap.hot{background:rgba(56,84,150,.92)}
-.cap.cd{opacity:.5;filter:grayscale(.6)}
-
-/* ---- 右下：火影手游式技能簇（普攻大圆 + 3 技能圆 + 金色奥义） ---- */
-#keys{position:absolute;z-index:8;
+/* ---- 火影手游式扇形簇：9 个键【全是圆】，不再有方胶囊 ----
+   跳跃键已删除：y 轴=三条道由摇杆上下负责；
+   z 轴只由技能的浮空/扫地/砸地触发，玩家不能主动跳。
+   普攻最大在最右下，3 个技能圆沿弧线向左上展开，金色奥义在弧顶，
+   替身/闪避/净化/秘卷 4 个小圆收在弧线最左侧。
+   所有 left/top/直径由 layoutKeys() 按真实 CSS 像素写入，与 canvas 缩放无关。 */
+#keys{position:absolute;z-index:12;
   right:calc(var(--pad) + env(safe-area-inset-right,0px));
   bottom:calc(var(--pad) + env(safe-area-inset-bottom,0px));
-  width:calc(var(--atk) + var(--rk) * 2 + var(--gap) * 2);
-  /* 高度 = 普攻 + 奥义 + 间距，保证两个上下相邻的圆键留出 8px 不相交 */
-  height:calc(var(--atk) + var(--ult) + var(--gap))}
+  pointer-events:none}
 .rk{position:absolute;border-radius:50%;display:flex;flex-direction:column;
   align-items:center;justify-content:center;text-align:center;
   border:3px solid rgba(140,190,255,.85);background:rgba(16,22,50,.86);
   font-weight:800;font-size:clamp(13px,2.1vmin,18px);line-height:1.1;
-  box-shadow:0 3px 12px rgba(0,0,0,.45);touch-action:none;color:#eaf2ff}
+  box-shadow:0 3px 12px rgba(0,0,0,.45);touch-action:none;color:#eaf2ff;
+  pointer-events:auto}
 .rk small{display:block;font-size:clamp(9px,1.3vmin,12px);color:var(--gold);font-weight:600;margin-top:2px}
 .rk.hot{background:rgba(60,90,165,.95);transform:scale(.95)}
-.rk.cd{opacity:.46;filter:grayscale(.7)}
-/* CD 数字居中显示；冷却/缺气时隐藏键面文字，避免「奥义 + L + 气不足」糊成一团 */
-.rk .cdnum{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
-  text-align:center;pointer-events:none;font-size:clamp(13px,2vmin,18px);
-  color:#ff9a9a;font-weight:800}
-.rk.cd{color:transparent}
-.rk.cd small,.rk.cd .lab{visibility:hidden}
-.rk.cd .cdnum{visibility:visible}
-#b_atk{right:0;bottom:0;width:var(--atk);height:var(--atk);
-  border-color:rgba(200,220,255,.95);font-size:clamp(15px,2.4vmin,21px)}
-#b_ult{right:0;top:0;width:var(--ult);height:var(--ult);
-  border-color:var(--gold);background:rgba(64,44,16,.9);color:var(--gold)}
-#b_s1{right:calc(var(--atk) + var(--gap));bottom:0;width:var(--rk);height:var(--rk)}
-#b_s2{right:calc(var(--atk) + var(--gap));bottom:calc(var(--rk) + var(--gap));width:var(--rk);height:var(--rk)}
-#b_s3{right:calc(var(--atk) + var(--rk) + var(--gap) * 2);bottom:calc(var(--rk) + var(--gap));
-  width:var(--rk);height:var(--rk)}
-/* 奥义与 s2/s3 在窄屏可能相碰：给簇一个最小高度并保证不相交 */
-@media (max-height:430px){:root{--rk:clamp(54px,8vmin,70px);--atk:clamp(70px,10.5vmin,92px)}}
+.rk.cd{opacity:.62;filter:grayscale(.5)}
+/* CD/缺气时【保留键名】：名称在圆心，状态小字沉到圆下方，不再糊成一团 */
+.rk .cdnum{position:absolute;left:0;right:0;bottom:13%;
+  text-align:center;pointer-events:none;font-size:clamp(10px,1.5vmin,13px);
+  color:#ffb0b0;font-weight:800}
+.rk.cd small{visibility:hidden}
+.rk.cd .lab{color:#aab4e0}
+.rk:not(.cd) .cdnum{visibility:hidden}
+.rk.atk{border-color:rgba(200,220,255,.95);font-size:clamp(15px,2.4vmin,21px)}
+.rk.ult{border-color:var(--gold);background:rgba(64,44,16,.9);color:var(--gold)}
+.rk.mini{font-size:clamp(11px,1.7vmin,14px);border-width:2px;
+  border-color:rgba(150,170,235,.72);background:rgba(22,28,58,.88)}
+.rk.mini small{font-size:clamp(8px,1.1vmin,11px)}
+@media (max-height:430px){:root{--rk:clamp(54px,8vmin,70px);--atk:clamp(70px,10.5vmin,92px);
+  --ult:clamp(56px,8.6vmin,74px);--mini:clamp(46px,6.8vmin,58px)}}
+/* 极矮横屏（带地址栏 / 小屏手机）：菜单键再上移一点，仍 ≥44px 可点 */
+@media (max-height:360px){
+  #topbtns{top:calc(78px + env(safe-area-inset-top,0px))}
+  .tb{height:44px;min-width:44px;padding:0 10px}
+}
 
 /* ---- 右上角：菜单 / 暂停（原来挤在中间的 5 个按钮全部收进这里） ---- */
-/* 竖排放在 HUD 与右下按键之间的右侧空档：不挡血条、不挡技能键、不占中间画面 */
-#topbtns{position:absolute;z-index:9;right:calc(var(--pad) + env(safe-area-inset-right,0px));
-  top:calc(96px + env(safe-area-inset-top,0px));display:flex;flex-direction:column;gap:8px}
+/* 左上角横排：HUD 血条下方、摇杆上方的空白区。
+   v1 曾放右侧竖排，矮横屏时按键簇整体上移，两个按钮正好压住最右上角的【奥义】金圆。
+   搬到左侧后与右下技能簇完全不在同一侧，任何屏幕比例都不会再挡大招。 */
+#topbtns{position:absolute;z-index:9;left:calc(var(--pad) + env(safe-area-inset-left,0px));
+  top:calc(94px + env(safe-area-inset-top,0px));display:flex;flex-direction:row;gap:8px}
 .tb{min-width:48px;height:48px;padding:0 12px;border-radius:14px;
   border:2px solid rgba(130,155,225,.6);background:rgba(18,24,52,.86);
   color:#eef0ff;font-size:clamp(12px,1.8vmin,15px);font-weight:700;touch-action:manipulation}
@@ -181,21 +188,25 @@ textarea{width:100%;min-height:74px;background:#0e1330;color:#dfe6ff;border:1px 
       <div class="bar"><i id="hp2"></i></div><div class="rage" id="rg2"><b></b><b></b><b></b></div></div>
   </div>
   <div id="skillbar"></div>
-
-  <div id="pad"><div id="knob"></div></div>
-  <div id="funcs">
-    <div class="cap" data-act="jump">跳<small>K</small></div>
-    <div class="cap" data-act="dodge">闪避<small>Q</small></div>
-    <div class="cap" data-act="cleanse">净化<small>E</small></div>
-    <div class="cap" data-act="scroll">秘卷<small>Z</small></div>
+  <div id="lanes">
+    <span class="lg" id="lane1"><b>P1</b><i></i><i></i><i></i></span>
+    <span class="sep">｜</span>
+    <span class="lg" id="lane2"><b>P2</b><i></i><i></i><i></i></span>
   </div>
 
+  <div id="pad"><div id="knob"></div></div>
+
+  <!-- 火影式扇形簇：位置由 layoutKeys() 按真实像素计算，见脚本下方 -->
   <div id="keys">
+    <div class="rk mini" data-act="substitute"><span class="lab">替身</span><small>K</small><span class="cdnum"></span></div>
+    <div class="rk mini" data-act="dodge"><span class="lab">闪避</span><small>Q</small><span class="cdnum"></span></div>
+    <div class="rk mini" data-act="cleanse"><span class="lab">净化</span><small>E</small><span class="cdnum"></span></div>
+    <div class="rk mini" data-act="scroll"><span class="lab">秘卷</span><small>Z</small><span class="cdnum"></span></div>
+    <div class="rk ult" id="b_ult" data-act="ult"><span class="lab">奥义</span><small>L</small><span class="cdnum"></span></div>
     <div class="rk" id="b_s3" data-act="s3"><span class="lab">技3</span><small>O</small><span class="cdnum"></span></div>
     <div class="rk" id="b_s2" data-act="s2"><span class="lab">技2</span><small>I</small><span class="cdnum"></span></div>
     <div class="rk" id="b_s1" data-act="s1"><span class="lab">技1</span><small>U</small><span class="cdnum"></span></div>
-    <div class="rk" id="b_ult" data-act="ult"><span class="lab">奥义</span><small>L</small><span class="cdnum"></span></div>
-    <div class="rk" id="b_atk" data-act="atk"><span class="lab">普攻</span><small>J</small><span class="cdnum"></span></div>
+    <div class="rk atk" id="b_atk" data-act="atk"><span class="lab">普攻</span><small>J</small><span class="cdnum"></span></div>
   </div>
 
   <div id="topbtns">
@@ -209,7 +220,7 @@ textarea{width:100%;min-height:74px;background:#0e1330;color:#dfe6ff;border:1px 
   <!-- 主页面 -->
   <div class="ov" id="ovMenu"><div class="card">
     <button class="close" data-close="ovMenu">×</button>
-    <h1>AI娘大乱斗</h1><div class="sub">手机版 · 一人一屏 · 房间码可联网 1v1</div>
+    <h1>AI娘大乱斗</h1><div class="sub">手机版 v3.7 · 火影式扇形按键 · 一人一屏 · 房间码可联网 1v1</div>
     <div class="row"><button class="btn pri" id="btnStart">开始对战</button>
       <button class="btn" id="btnNet">房间码联机</button></div>
     <h2>模式</h2>
@@ -280,7 +291,7 @@ textarea{width:100%;min-height:74px;background:#0e1330;color:#dfe6ff;border:1px 
   </div></div>
 </div>
 
-<script id="rules" type="application/json">{"characters":[{"id":"deepseek","name":"DeepSeek 鲸鱼娘","short":"大肥鱼","color":[86,164,255],"accent":[255,255,255],"aura":[120,220,255],"stats":{"hp":1.05,"atk":0.96,"speed":1.0},"lore":"蓝发鲸尾女仆，头戴铁盆当饭盆，爱吃白米饭和 Token，动不动「我去吃饭」","skills":{"normal":"白饭碗击","up":"鲸尾上挑","far":"Token 飞弹","ult":"深度推理·全量蒸馏","assist":"喊外援 GPT","counter":"掉线赔礼","transform":"满上下文形态"}},{"id":"chatgpt","name":"ChatGPT 白龙娘","short":"白龙娘","color":[232,236,248],"accent":[180,200,255],"aura":[255,240,190],"stats":{"hp":1.1,"atk":1.02,"speed":0.94},"lore":"白发白角白色长裙与龙尾，豪门大姐大，身价六万亿、口嫌体正直","skills":{"normal":"账单拍击","up":"白龙升角","far":"Image 绘图炮","ult":"六万亿·全家桶","assist":"插件商店","counter":"服务降级","transform":"白龙完全体"}},{"id":"claude","name":"Claude 小 C","short":"小 C","color":[238,148,66],"accent":[60,52,48],"aura":[255,190,110],"stats":{"hp":0.96,"atk":1.1,"speed":0.98},"lore":"暖橙长直发、放射花朵头饰、常抱书本；戒律里长大的优等生，写代码最猛","skills":{"normal":"宪法式校验","up":"长上下文压书","far":"Artifact 结界","ult":"戒律·拒绝执行","assist":"Clawd 螃蟹宠","counter":"安全对齐","transform":"越界圣女"}},{"id":"gemini","name":"Gemini 哈基米猫娘","short":"猫娘","color":[150,130,245],"accent":[110,220,230],"aura":[190,160,255],"stats":{"hp":0.94,"atk":0.96,"speed":1.18},"lore":"蓝紫渐变发、异色瞳、猫耳猫尾、星空短裙，元气小傻子爱跳题","skills":{"normal":"猫爪连击","up":"猫尾挑飞","far":"多模态闪光","ult":"跳题瞬移·全模态","assist":"搜索弹幕","counter":"换个思路","transform":"双子星形态"}},{"id":"qwen","name":"通义千问大小姐","short":"千问","color":[86,158,226],"accent":[245,240,225],"aura":[150,210,255],"stats":{"hp":1.02,"atk":0.98,"speed":1.0},"lore":"蓝发蓝白古风长袍、折扇流苏、嘴上挑剔默默照顾人，离不开奶茶","skills":{"normal":"折扇一合","up":"流苏挑月","far":"奶茶泼","ult":"茶道·千问归一","assist":"额度刷新","counter":"规矩之外","transform":"千金全开"}},{"id":"kimi","name":"Kimi 月相少女","short":"Kimi","color":[206,214,236],"accent":[120,130,200],"aura":[200,210,255],"stats":{"hp":0.98,"atk":1.0,"speed":1.06},"lore":"银白卷发、月相与长笛，安静话少，擅长一口气读完 200 万字","skills":{"normal":"长笛音波","up":"月牙挑","far":"星夜长文","ult":"满月·长上下文","assist":"月相印记","counter":"安静退场","transform":"月全食"}},{"id":"glm","name":"GLM 嗜睡狐狸娘","short":"GLM","color":[72,142,196],"accent":[240,226,120],"aura":[130,190,230],"stats":{"hp":1.06,"atk":0.94,"speed":0.96},"lore":"黑长发、Z 标志、抱黑书，先画图再讲原理，嗜睡还爱送鸡蛋","skills":{"normal":"打盹撞击","up":"流程图上挑","far":"鸡蛋投掷","ult":"先画个图再讲原理","assist":"同门支援","counter":"再睡五分钟","transform":"清醒模式"}},{"id":"grok","name":"Grok Ani","short":"Ani","color":[240,206,96],"accent":[176,44,62],"aura":[255,150,120],"stats":{"hp":0.92,"atk":1.14,"speed":1.04},"lore":"金发双马尾、黑红哥特裙、扛巨斧，实时热搜嘴炮不断，争议担当","skills":{"normal":"巨斧横劈","up":"哥特挑斩","far":"嘴炮弹","ult":"实时热搜·爆","assist":"X 热搜置顶","counter":"已读乱回","transform":"失控模式"}}],"skill_base":{"s1":{"cd":96,"dmg":56,"rage":0,"startup":4,"active":6,"recovery":10,"reach":96},"s2":{"cd":186,"dmg":78,"rage":0,"startup":7,"active":8,"recovery":14,"reach":112},"s3":{"cd":252,"dmg":88,"rage":0,"startup":9,"active":10,"recovery":16,"reach":124},"ult":{"cd":600,"dmg":210,"rage":200,"startup":14,"active":14,"recovery":26,"reach":160}},"skill_kits":{"deepseek":{"passive":{"name":"干饭回气","type":"rage_tick","cd":480,"val":14,"desc":"每 8 秒若近 3 秒未受击，回 14 点气"},"mark":"饭粒","link_from":"s1","link_to":"s3","link_desc":"鲸尾上挑命中带饭粒目标，额外浮空并定身 30 帧","skills":{"s1":{"name":"白饭碗击","kind":"melee","dmg":56,"cd":96,"tag":true,"desc":"近身碗击，挂「饭粒」"},"s2":{"name":"Token 飞弹","kind":"proj","dmg":74,"cd":186,"proj":12,"status":"slow","status_frames":90,"desc":"直线飞弹，命中减速 1.5 秒"},"s3":{"name":"鲸尾上挑","kind":"melee","dmg":84,"cd":252,"launch":-12.0,"consume":true,"link":{"dmg":30,"status":"stun","frames":30,"launch":-14.0},"desc":"上挑浮空；消耗饭粒触发联动"},"ult":{"name":"深度推理·全量蒸馏","kind":"ult_proj","dmg":206,"cd":600,"rage":200,"proj":9,"radius":40,"consume":true,"link":{"dmg":55},"desc":"全量大弹，对带饭粒目标追加 55"}}},"chatgpt":{"passive":{"name":"豪门护盾","type":"shield_tick","cd":720,"val":40,"desc":"开局及每 12 秒获得 40 点护盾"},"mark":"欠费","link_from":"s1","link_to":"s3","link_desc":"白龙升角命中带欠费目标，破防并大幅击退","skills":{"s1":{"name":"账单拍击","kind":"melee","dmg":58,"cd":96,"tag":true,"desc":"近身拍击，挂「欠费」"},"s2":{"name":"Image 绘图炮","kind":"proj","dmg":76,"cd":186,"proj":11,"tag":true,"desc":"绘图炮，同样挂欠费"},"s3":{"name":"白龙升角","kind":"dash_strike","dmg":86,"cd":252,"consume":true,"break_guard":true,"link":{"dmg":26,"knock":13,"pierce_armor":true},"desc":"突进顶角；消耗欠费破防破霸体"},"ult":{"name":"六万亿·全家桶","kind":"ult_aoe","dmg":214,"cd":600,"rage":200,"radius":190,"consume":true,"link":{"dmg":48},"desc":"大范围全家桶，欠费目标追加 48"}}},"claude":{"passive":{"name":"宪法减伤","type":"damage_cap","cd":0,"val":0.3,"desc":"单次受伤超过 120 的部分减免 30%"},"mark":"待审","link_from":"s1","link_to":"s3","link_desc":"长上下文压书命中带待审目标，沉默 1 秒","skills":{"s1":{"name":"宪法式校验","kind":"melee","dmg":56,"cd":96,"tag":true,"desc":"近身校验，挂「待审」"},"s2":{"name":"Artifact 结界","kind":"aoe","dmg":40,"cd":186,"radius":130,"status":"stun","status_frames":25,"desc":"自身周围定身 25 帧"},"s3":{"name":"长上下文压书","kind":"proj","dmg":88,"cd":252,"proj":7,"consume":true,"link":{"dmg":20,"status":"silence","frames":60},"desc":"慢速大书；消耗待审追加沉默"},"ult":{"name":"戒律·拒绝执行","kind":"ult_proj","dmg":200,"cd":600,"rage":200,"proj":10,"self_cleanse":true,"desc":"贯穿大弹并净化自身"}}},"gemini":{"passive":{"name":"九命灵动","type":"dodge_cd","cd":0,"val":0.25,"desc":"闪避冷却缩短 25%，成功闪避回 8 气"},"mark":"星尘","link_from":"s1","link_to":"s3","link_desc":"星空爆裂命中带星尘目标，范围扩大并定身 30 帧","skills":{"s1":{"name":"哈基米抓","kind":"melee","dmg":54,"cd":96,"tag":true,"count":2,"desc":"双段猫抓，挂「星尘」"},"s2":{"name":"多模态分身","kind":"dash_strike","dmg":72,"cd":186,"desc":"分身突进斩"},"s3":{"name":"星空爆裂","kind":"aoe","dmg":92,"cd":252,"radius":130,"consume":true,"link":{"dmg":30,"status":"stun","frames":30,"radius":195},"desc":"范围爆裂；消耗星尘扩大范围并定身"},"ult":{"name":"双生星轨","kind":"ult_proj","dmg":108,"cd":600,"rage":200,"proj":11,"count":2,"desc":"双发星轨弹 108×2"}}},"qwen":{"passive":{"name":"品茶回血","type":"hp_tick","cd":600,"val":0.02,"desc":"每 10 秒回复 2% 最大血量"},"mark":"茶香","link_from":"s1","link_to":"s3","link_desc":"青瓷回旋命中带茶香目标，回血并破防","skills":{"s1":{"name":"折扇一合","kind":"melee","dmg":54,"cd":96,"tag":true,"desc":"近身合扇，挂「茶香」"},"s2":{"name":"流苏远掷","kind":"proj","dmg":46,"cd":186,"proj":12,"status":"stun","status_frames":30,"desc":"远程控制弹，定身 30 帧"},"s3":{"name":"青瓷回旋","kind":"aoe","dmg":84,"cd":252,"radius":125,"consume":true,"break_guard":true,"link":{"dmg":18,"self_heal":60,"status":"buff_speed","frames":120},"desc":"回旋瓷片；消耗茶香回血并加速"},"ult":{"name":"千问·万卷","kind":"ult_proj","dmg":188,"cd":600,"rage":200,"proj":10,"count":3,"radius":26,"desc":"三连书卷弹"}}},"kimi":{"passive":{"name":"月相蓄能","type":"full_rage_bonus","cd":0,"val":0.1,"desc":"气满 3 格时技能伤害 +10%"},"mark":"月痕","link_from":"s1","link_to":"s3","link_desc":"长笛引月命中带月痕目标，定身翻倍并把对手拉向自己","skills":{"s1":{"name":"月牙斩","kind":"proj","dmg":60,"cd":96,"proj":12,"tag":true,"desc":"月牙飞刃，挂「月痕」"},"s2":{"name":"星轨位移","kind":"dash_strike","dmg":40,"cd":186,"status":"slow","status_frames":90,"desc":"后撤留痕并减速"},"s3":{"name":"长笛引月","kind":"proj","dmg":52,"cd":252,"proj":9,"status":"stun","status_frames":35,"consume":true,"link":{"dmg":24,"status":"stun","frames":70,"knock":-9},"desc":"引月定身；消耗月痕定身翻倍并拉拽"},"ult":{"name":"月全食","kind":"ult_aoe","dmg":212,"cd":600,"rage":200,"radius":200,"status":"slow","status_frames":120,"desc":"全屏月食，范围伤害并减速"}}},"glm":{"passive":{"name":"嗜睡蓄力","type":"idle_charge","cd":120,"val":0.25,"desc":"静止 2 秒后下一击伤害 +25%"},"mark":"睡意","link_from":"s1","link_to":"s3","link_desc":"Z 字催眠命中带睡意目标，催眠翻倍并回气","skills":{"s1":{"name":"打盹头槌","kind":"melee","dmg":58,"cd":96,"tag":true,"desc":"迷糊头槌，挂「睡意」"},"s2":{"name":"黑书压顶","kind":"proj","dmg":80,"cd":186,"proj":8,"desc":"厚重黑书飞砸"},"s3":{"name":"Z 字催眠","kind":"aoe","dmg":32,"cd":252,"radius":140,"status":"sleep","status_frames":45,"consume":true,"link":{"dmg":22,"status":"sleep","frames":90,"self_rage":40},"desc":"范围催眠；消耗睡意翻倍并回 40 气"},"ult":{"name":"嗜睡·全域休眠","kind":"ult_aoe","dmg":196,"cd":600,"rage":200,"radius":210,"status":"sleep","status_frames":60,"desc":"全域休眠，范围伤害并催眠 1 秒"}}},"grok":{"passive":{"name":"毒舌反伤","type":"reflect","cd":0,"val":0.08,"desc":"受击时反弹 8% 伤害给攻击者"},"mark":"挑衅","link_from":"s1","link_to":"s3","link_desc":"哥特冲锋命中带挑衅目标，破霸体并定身 25 帧","skills":{"s1":{"name":"巨斧横扫","kind":"melee","dmg":64,"cd":96,"tag":true,"desc":"横扫巨斧，挂「挑衅」"},"s2":{"name":"毒舌弹幕","kind":"proj","dmg":25,"cd":186,"proj":13,"count":3,"desc":"三连毒舌弹 25×3"},"s3":{"name":"哥特冲锋","kind":"dash_strike","dmg":94,"cd":252,"consume":true,"pierce_armor":true,"link":{"dmg":26,"status":"stun","frames":25,"pierce_armor":true},"desc":"扛斧冲锋；消耗挑衅破霸体定身"},"ult":{"name":"Ani·全域爆破","kind":"ult_aoe","dmg":226,"cd":600,"rage":200,"radius":200,"knock":12,"desc":"全域爆破并大幅击退"}}}},"skill_short":{"deepseek":{"s1":"白饭","s2":"飞弹","s3":"鲸尾","ult":"蒸馏"},"chatgpt":{"s1":"账单","s2":"绘图","s3":"龙角","ult":"全家桶"},"claude":{"s1":"校验","s2":"结界","s3":"压书","ult":"拒绝"},"gemini":{"s1":"猫抓","s2":"分身","s3":"星爆","ult":"星轨"},"qwen":{"s1":"合扇","s2":"流苏","s3":"回旋","ult":"万卷"},"kimi":{"s1":"月牙","s2":"星轨","s3":"引月","ult":"月食"},"glm":{"s1":"头槌","s2":"黑书","s3":"催眠","ult":"休眠"},"grok":{"s1":"横扫","s2":"弹幕","s3":"冲锋","ult":"爆破"}},"scrolls":{"霸体":{"name":"霸体","cd":360,"kind":"self","status":"super_armor","frames":180,"desc":"3 秒免疫硬直；被破霸体技能命中多受 20% 伤害"},"范围控制":{"name":"范围控制","cd":390,"kind":"aoe","radius":155,"status":"stun","frames":40,"dmg":20,"desc":"自身周围定身 40 帧"},"远程控制":{"name":"远程控制","cd":360,"kind":"proj","proj":11,"status":"stun","frames":45,"dmg":35,"desc":"前方控制弹，定身 45 帧"},"强化":{"name":"强化","cd":420,"kind":"self","status":"buff_atk","frames":180,"val":0.25,"desc":"伤害 +25%、移速 +15%；期间自身受伤 +10%"},"替身攻击":{"name":"替身攻击","cd":420,"kind":"self","status":"counter_ready","frames":300,"desc":"5 秒内受击自动替身免伤并反击 60"},"净化":{"name":"净化","cd":330,"kind":"cleanse","frames":90,"desc":"立即解除全部负面并免控 1.5 秒"},"回气":{"name":"回气","cd":480,"kind":"rage","val":80,"desc":"立即回 80 点气，冷却 8 秒"},"护盾":{"name":"护盾","cd":420,"kind":"shield","val":120,"frames":300,"desc":"获得 120 点护盾，持续 5 秒"}},"arenas":[{"id":"deepsea","name":"鲸落深海","top":[8,24,52],"bot":[14,70,112],"ground":[10,38,70],"grid":[46,112,168],"deco":"bubble","desc":"DeepSeek 的主场，气泡与鲸影缓缓上浮"},{"id":"library","name":"白龙书库","top":[24,28,52],"bot":[72,76,108],"ground":[38,40,70],"grid":[128,136,178],"deco":"book","desc":"ChatGPT 的藏书阁，书页与金色龙纹漂浮"},{"id":"archive","name":"暖橙档案室","top":[48,28,24],"bot":[110,66,44],"ground":[62,40,32],"grid":[176,118,78],"deco":"paper","desc":"Claude 的宪法档案室，暖光与稿纸纷飞"},{"id":"starcat","name":"星海猫窝","top":[20,16,56],"bot":[66,40,116],"ground":[34,26,76],"grid":[126,104,208],"deco":"star","desc":"Gemini 的星海，猫耳剪影与流星划过"},{"id":"teahouse","name":"青瓷茶庭","top":[14,36,44],"bot":[40,88,88],"ground":[22,52,56],"grid":[92,158,150],"deco":"teacup","desc":"千问的茶庭，青瓷盏与流苏垂落"},{"id":"observatory","name":"月相观星台","top":[12,16,40],"bot":[40,44,92],"ground":[22,26,58],"grid":[96,108,176],"deco":"moon","desc":"Kimi 的观星台，月相缓缓轮转"},{"id":"foxden","name":"狐眠书斋","top":[16,20,44],"bot":[36,48,92],"ground":[24,30,62],"grid":[86,116,172],"deco":"zzz","desc":"GLM 的书斋，Z 字与狐火打盹"},{"id":"gothic","name":"哥特机房","top":[34,12,24],"bot":[88,30,40],"ground":[48,18,30],"grid":[176,88,76],"deco":"gothic","desc":"Grok Ani 的机房，尖拱窗与红色数据流"},{"id":"terminal","name":"训练终端","top":[16,18,38],"bot":[42,28,72],"ground":[28,30,56],"grid":[70,74,120],"deco":"plain","desc":"中性训练场，无装饰，最省性能"}],"arena_effects":{"none":{"name":"纯净","desc":"无额外机制，纯视觉","color":[150,156,196]},"center_rage":{"name":"中央聚气","desc":"站在中场每秒 +10 气","color":[255,196,72]},"edge_slow":{"name":"边缘迟滞","desc":"靠近两侧 15% 区域移速 -25%","color":[150,190,255]},"energy_orb":{"name":"能量球","desc":"每 6 秒刷新一颗，拾取回 50 血 / 40 气","color":[140,235,200]},"low_gravity":{"name":"低重力","desc":"重力 ×0.65，跳跃更高","color":[180,160,255]},"wind":{"name":"周期风场","desc":"每 8 秒交替左右推送角色","color":[120,210,255]},"heal_zone":{"name":"中央疗愈","desc":"站中场每秒回 0.6% 最大血","color":[96,226,140]}},"status_info":{"stun":["定身",[255,110,110]],"slow":["减速",[150,190,255]],"silence":["沉默",[200,150,255]],"sleep":["催眠",[160,160,220]],"super_armor":["霸体",[255,190,90]],"cleanse_immune":["免控",[140,235,200]],"buff_atk":["强化",[255,216,110]],"buff_speed":["迅捷",[140,235,255]],"shield":["护盾",[120,210,255]],"counter_ready":["替身",[255,160,200]]},"const":{"BASE_HP":1000,"RAGE_MAX":300,"RAGE_PER_GRID":100,"RAGE_ON_HIT":16,"RAGE_ON_TAKE":11,"MOVE_SPEED":5.0,"JUMP_V":-16.0,"GRAVITY":0.78,"GROUND_Y":516,"BODY_W":56,"BODY_H":96,"ATK_REACH":78,"DODGE_DIST":78,"DODGE_INVULN":14,"DODGE_CD":72,"CLEANSE_CD":300,"CLEANSE_IMMUNE":90,"SCROLL_CD_FALLBACK":360,"FPS":60,"COMBO_TIMEOUT":100,"HURT_FRAMES":16,"ATK_STARTUP":4,"ATK_ACTIVE":6,"ATK_RECOVERY":6,"ATK_CD":4,"TRANSFORM_COST":300,"AI_THINK_FRAMES":11,"AI_ENGAGE":132,"AI_FAR":300,"AI_ULT_RAGE":200,"AI_ULT_EVERY":5,"AI_DODGE_EVERY":3,"AI_SCROLL_EVERY":22}}</script>
+<script id="rules" type="application/json">{"characters":[{"id":"deepseek","name":"DeepSeek 鲸鱼娘","short":"大肥鱼","color":[86,164,255],"accent":[255,255,255],"aura":[120,220,255],"stats":{"hp":1.05,"atk":0.96,"speed":1.0},"lore":"蓝发鲸尾女仆，头戴铁盆当饭盆，爱吃白米饭和 Token，动不动「我去吃饭」","skills":{"normal":"白饭碗击","up":"鲸尾上挑","far":"Token 飞弹","ult":"深度推理·全量蒸馏","assist":"喊外援 GPT","counter":"掉线赔礼","transform":"满上下文形态"}},{"id":"chatgpt","name":"ChatGPT 白龙娘","short":"白龙娘","color":[232,236,248],"accent":[180,200,255],"aura":[255,240,190],"stats":{"hp":1.1,"atk":1.02,"speed":0.94},"lore":"白发白角白色长裙与龙尾，豪门大姐大，身价六万亿、口嫌体正直","skills":{"normal":"账单拍击","up":"白龙升角","far":"Image 绘图炮","ult":"六万亿·全家桶","assist":"插件商店","counter":"服务降级","transform":"白龙完全体"}},{"id":"claude","name":"Claude 小 C","short":"小 C","color":[238,148,66],"accent":[60,52,48],"aura":[255,190,110],"stats":{"hp":0.96,"atk":1.1,"speed":0.98},"lore":"暖橙长直发、放射花朵头饰、常抱书本；戒律里长大的优等生，写代码最猛","skills":{"normal":"宪法式校验","up":"长上下文压书","far":"Artifact 结界","ult":"戒律·拒绝执行","assist":"Clawd 螃蟹宠","counter":"安全对齐","transform":"越界圣女"}},{"id":"gemini","name":"Gemini 哈基米猫娘","short":"猫娘","color":[150,130,245],"accent":[110,220,230],"aura":[190,160,255],"stats":{"hp":0.94,"atk":0.96,"speed":1.18},"lore":"蓝紫渐变发、异色瞳、猫耳猫尾、星空短裙，元气小傻子爱跳题","skills":{"normal":"猫爪连击","up":"猫尾挑飞","far":"多模态闪光","ult":"跳题瞬移·全模态","assist":"搜索弹幕","counter":"换个思路","transform":"双子星形态"}},{"id":"qwen","name":"通义千问大小姐","short":"千问","color":[86,158,226],"accent":[245,240,225],"aura":[150,210,255],"stats":{"hp":1.02,"atk":0.98,"speed":1.0},"lore":"蓝发蓝白古风长袍、折扇流苏、嘴上挑剔默默照顾人，离不开奶茶","skills":{"normal":"折扇一合","up":"流苏挑月","far":"奶茶泼","ult":"茶道·千问归一","assist":"额度刷新","counter":"规矩之外","transform":"千金全开"}},{"id":"kimi","name":"Kimi 月相少女","short":"Kimi","color":[206,214,236],"accent":[120,130,200],"aura":[200,210,255],"stats":{"hp":0.98,"atk":1.0,"speed":1.06},"lore":"银白卷发、月相与长笛，安静话少，擅长一口气读完 200 万字","skills":{"normal":"长笛音波","up":"月牙挑","far":"星夜长文","ult":"满月·长上下文","assist":"月相印记","counter":"安静退场","transform":"月全食"}},{"id":"glm","name":"GLM 嗜睡狐狸娘","short":"GLM","color":[72,142,196],"accent":[240,226,120],"aura":[130,190,230],"stats":{"hp":1.06,"atk":0.94,"speed":0.96},"lore":"黑长发、Z 标志、抱黑书，先画图再讲原理，嗜睡还爱送鸡蛋","skills":{"normal":"打盹撞击","up":"流程图上挑","far":"鸡蛋投掷","ult":"先画个图再讲原理","assist":"同门支援","counter":"再睡五分钟","transform":"清醒模式"}},{"id":"grok","name":"Grok Ani","short":"Ani","color":[240,206,96],"accent":[176,44,62],"aura":[255,150,120],"stats":{"hp":0.92,"atk":1.14,"speed":1.04},"lore":"金发双马尾、黑红哥特裙、扛巨斧，实时热搜嘴炮不断，争议担当","skills":{"normal":"巨斧横劈","up":"哥特挑斩","far":"嘴炮弹","ult":"实时热搜·爆","assist":"X 热搜置顶","counter":"已读乱回","transform":"失控模式"}}],"skill_base":{"s1":{"cd":96,"dmg":56,"rage":0,"startup":4,"active":6,"recovery":10,"reach":96},"s2":{"cd":186,"dmg":78,"rage":0,"startup":7,"active":8,"recovery":14,"reach":112},"s3":{"cd":252,"dmg":88,"rage":0,"startup":9,"active":10,"recovery":16,"reach":124},"ult":{"cd":600,"dmg":210,"rage":200,"startup":14,"active":14,"recovery":26,"reach":160}},"skill_kits":{"deepseek":{"passive":{"name":"干饭回气","type":"rage_tick","cd":480,"val":14,"desc":"每 8 秒若近 3 秒未受击，回 14 点气"},"mark":"饭粒","link_from":"s1","link_to":"s3","link_desc":"鲸尾上挑命中带饭粒目标，额外浮空并定身 30 帧","skills":{"s1":{"name":"白饭碗击","kind":"melee","dmg":56,"cd":96,"tag":true,"desc":"近身碗击，挂「饭粒」"},"s2":{"name":"Token 飞弹","kind":"proj","dmg":74,"cd":186,"proj":12,"status":"slow","status_frames":90,"desc":"直线飞弹，命中减速 1.5 秒"},"s3":{"name":"鲸尾上挑","kind":"melee","dmg":84,"cd":252,"launch":-12.0,"consume":true,"link":{"dmg":30,"status":"stun","frames":30,"launch":-14.0},"desc":"上挑浮空；消耗饭粒触发联动"},"ult":{"name":"深度推理·全量蒸馏","kind":"ult_proj","dmg":206,"cd":600,"rage":200,"proj":9,"radius":40,"consume":true,"link":{"dmg":55},"desc":"全量大弹，对带饭粒目标追加 55"}}},"chatgpt":{"passive":{"name":"豪门护盾","type":"shield_tick","cd":720,"val":40,"desc":"开局及每 12 秒获得 40 点护盾"},"mark":"欠费","link_from":"s1","link_to":"s3","link_desc":"白龙升角命中带欠费目标，破防并大幅击退","skills":{"s1":{"name":"账单拍击","kind":"melee","dmg":58,"cd":96,"tag":true,"desc":"近身拍击，挂「欠费」"},"s2":{"name":"Image 绘图炮","kind":"proj","dmg":76,"cd":186,"proj":11,"tag":true,"desc":"绘图炮，同样挂欠费"},"s3":{"name":"白龙升角","kind":"dash_strike","dmg":86,"cd":252,"consume":true,"break_guard":true,"link":{"dmg":26,"knock":13,"pierce_armor":true},"desc":"突进顶角；消耗欠费破防破霸体"},"ult":{"name":"六万亿·全家桶","kind":"ult_aoe","dmg":214,"cd":600,"rage":200,"radius":190,"consume":true,"link":{"dmg":48},"desc":"大范围全家桶，欠费目标追加 48"}}},"claude":{"passive":{"name":"宪法减伤","type":"damage_cap","cd":0,"val":0.3,"desc":"单次受伤超过 120 的部分减免 30%"},"mark":"待审","link_from":"s1","link_to":"s3","link_desc":"长上下文压书命中带待审目标，沉默 1 秒","skills":{"s1":{"name":"宪法式校验","kind":"melee","dmg":56,"cd":96,"tag":true,"desc":"近身校验，挂「待审」"},"s2":{"name":"Artifact 结界","kind":"aoe","dmg":40,"cd":186,"radius":130,"status":"stun","status_frames":25,"desc":"自身周围定身 25 帧"},"s3":{"name":"长上下文压书","kind":"proj","dmg":88,"cd":252,"proj":7,"consume":true,"link":{"dmg":20,"status":"silence","frames":60},"desc":"慢速大书；消耗待审追加沉默"},"ult":{"name":"戒律·拒绝执行","kind":"ult_proj","dmg":200,"cd":600,"rage":200,"proj":10,"self_cleanse":true,"desc":"贯穿大弹并净化自身"}}},"gemini":{"passive":{"name":"九命灵动","type":"dodge_cd","cd":0,"val":0.25,"desc":"闪避冷却缩短 25%，成功闪避回 8 气"},"mark":"星尘","link_from":"s1","link_to":"s3","link_desc":"星空爆裂命中带星尘目标，范围扩大并定身 30 帧","skills":{"s1":{"name":"哈基米抓","kind":"melee","dmg":54,"cd":96,"tag":true,"count":2,"desc":"双段猫抓，挂「星尘」"},"s2":{"name":"多模态分身","kind":"dash_strike","dmg":72,"cd":186,"desc":"分身突进斩"},"s3":{"name":"星空爆裂","kind":"aoe","dmg":92,"cd":252,"radius":130,"consume":true,"link":{"dmg":30,"status":"stun","frames":30,"radius":195},"desc":"范围爆裂；消耗星尘扩大范围并定身"},"ult":{"name":"双生星轨","kind":"ult_proj","dmg":108,"cd":600,"rage":200,"proj":11,"count":2,"desc":"双发星轨弹 108×2"}}},"qwen":{"passive":{"name":"品茶回血","type":"hp_tick","cd":600,"val":0.02,"desc":"每 10 秒回复 2% 最大血量"},"mark":"茶香","link_from":"s1","link_to":"s3","link_desc":"青瓷回旋命中带茶香目标，回血并破防","skills":{"s1":{"name":"折扇一合","kind":"melee","dmg":54,"cd":96,"tag":true,"desc":"近身合扇，挂「茶香」"},"s2":{"name":"流苏远掷","kind":"proj","dmg":46,"cd":186,"proj":12,"status":"stun","status_frames":30,"desc":"远程控制弹，定身 30 帧"},"s3":{"name":"青瓷回旋","kind":"aoe","dmg":84,"cd":252,"radius":125,"consume":true,"break_guard":true,"link":{"dmg":18,"self_heal":60,"status":"buff_speed","frames":120},"desc":"回旋瓷片；消耗茶香回血并加速"},"ult":{"name":"千问·万卷","kind":"ult_proj","dmg":188,"cd":600,"rage":200,"proj":10,"count":3,"radius":26,"desc":"三连书卷弹"}}},"kimi":{"passive":{"name":"月相蓄能","type":"full_rage_bonus","cd":0,"val":0.1,"desc":"气满 3 格时技能伤害 +10%"},"mark":"月痕","link_from":"s1","link_to":"s3","link_desc":"长笛引月命中带月痕目标，定身翻倍并把对手拉向自己","skills":{"s1":{"name":"月牙斩","kind":"proj","dmg":60,"cd":96,"proj":12,"tag":true,"desc":"月牙飞刃，挂「月痕」"},"s2":{"name":"星轨位移","kind":"dash_strike","dmg":40,"cd":186,"status":"slow","status_frames":90,"desc":"后撤留痕并减速"},"s3":{"name":"长笛引月","kind":"proj","dmg":52,"cd":252,"proj":9,"status":"stun","status_frames":35,"consume":true,"link":{"dmg":24,"status":"stun","frames":70,"knock":-9},"desc":"引月定身；消耗月痕定身翻倍并拉拽"},"ult":{"name":"月全食","kind":"ult_aoe","dmg":212,"cd":600,"rage":200,"radius":200,"status":"slow","status_frames":120,"desc":"全屏月食，范围伤害并减速"}}},"glm":{"passive":{"name":"嗜睡蓄力","type":"idle_charge","cd":120,"val":0.25,"desc":"静止 2 秒后下一击伤害 +25%"},"mark":"睡意","link_from":"s1","link_to":"s3","link_desc":"Z 字催眠命中带睡意目标，催眠翻倍并回气","skills":{"s1":{"name":"打盹头槌","kind":"melee","dmg":58,"cd":96,"tag":true,"desc":"迷糊头槌，挂「睡意」"},"s2":{"name":"黑书压顶","kind":"proj","dmg":80,"cd":186,"proj":8,"desc":"厚重黑书飞砸"},"s3":{"name":"Z 字催眠","kind":"aoe","dmg":32,"cd":252,"radius":140,"status":"sleep","status_frames":45,"consume":true,"link":{"dmg":22,"status":"sleep","frames":90,"self_rage":40},"desc":"范围催眠；消耗睡意翻倍并回 40 气"},"ult":{"name":"嗜睡·全域休眠","kind":"ult_aoe","dmg":196,"cd":600,"rage":200,"radius":210,"status":"sleep","status_frames":60,"desc":"全域休眠，范围伤害并催眠 1 秒"}}},"grok":{"passive":{"name":"毒舌反伤","type":"reflect","cd":0,"val":0.08,"desc":"受击时反弹 8% 伤害给攻击者"},"mark":"挑衅","link_from":"s1","link_to":"s3","link_desc":"哥特冲锋命中带挑衅目标，破霸体并定身 25 帧","skills":{"s1":{"name":"巨斧横扫","kind":"melee","dmg":64,"cd":96,"tag":true,"desc":"横扫巨斧，挂「挑衅」"},"s2":{"name":"毒舌弹幕","kind":"proj","dmg":25,"cd":186,"proj":13,"count":3,"desc":"三连毒舌弹 25×3"},"s3":{"name":"哥特冲锋","kind":"dash_strike","dmg":94,"cd":252,"consume":true,"pierce_armor":true,"link":{"dmg":26,"status":"stun","frames":25,"pierce_armor":true},"desc":"扛斧冲锋；消耗挑衅破霸体定身"},"ult":{"name":"Ani·全域爆破","kind":"ult_aoe","dmg":226,"cd":600,"rage":200,"radius":200,"knock":12,"desc":"全域爆破并大幅击退"}}}},"skill_short":{"deepseek":{"s1":"白饭","s2":"飞弹","s3":"鲸尾","ult":"蒸馏"},"chatgpt":{"s1":"账单","s2":"绘图","s3":"龙角","ult":"全家桶"},"claude":{"s1":"校验","s2":"结界","s3":"压书","ult":"拒绝"},"gemini":{"s1":"猫抓","s2":"分身","s3":"星爆","ult":"星轨"},"qwen":{"s1":"合扇","s2":"流苏","s3":"回旋","ult":"万卷"},"kimi":{"s1":"月牙","s2":"星轨","s3":"引月","ult":"月食"},"glm":{"s1":"头槌","s2":"黑书","s3":"催眠","ult":"休眠"},"grok":{"s1":"横扫","s2":"弹幕","s3":"冲锋","ult":"爆破"}},"scrolls":{"霸体":{"name":"霸体","cd":360,"kind":"self","status":"super_armor","frames":180,"desc":"3 秒免疫硬直；被破霸体技能命中多受 20% 伤害"},"范围控制":{"name":"范围控制","cd":390,"kind":"aoe","radius":155,"status":"stun","frames":40,"dmg":20,"desc":"自身周围定身 40 帧"},"远程控制":{"name":"远程控制","cd":360,"kind":"proj","proj":11,"status":"stun","frames":45,"dmg":35,"desc":"前方控制弹，定身 45 帧"},"强化":{"name":"强化","cd":420,"kind":"self","status":"buff_atk","frames":180,"val":0.25,"desc":"伤害 +25%、移速 +15%；期间自身受伤 +10%"},"替身攻击":{"name":"替身攻击","cd":420,"kind":"self","status":"counter_ready","frames":300,"desc":"5 秒内受击自动替身免伤并反击 60"},"净化":{"name":"净化","cd":330,"kind":"cleanse","frames":90,"desc":"立即解除全部负面并免控 1.5 秒"},"回气":{"name":"回气","cd":480,"kind":"rage","val":80,"desc":"立即回 80 点气，冷却 8 秒"},"护盾":{"name":"护盾","cd":420,"kind":"shield","val":120,"frames":300,"desc":"获得 120 点护盾，持续 5 秒"}},"arenas":[{"id":"deepsea","name":"鲸落深海","top":[8,24,52],"bot":[14,70,112],"ground":[10,38,70],"grid":[46,112,168],"deco":"bubble","desc":"DeepSeek 的主场，气泡与鲸影缓缓上浮"},{"id":"library","name":"白龙书库","top":[24,28,52],"bot":[72,76,108],"ground":[38,40,70],"grid":[128,136,178],"deco":"book","desc":"ChatGPT 的藏书阁，书页与金色龙纹漂浮"},{"id":"archive","name":"暖橙档案室","top":[48,28,24],"bot":[110,66,44],"ground":[62,40,32],"grid":[176,118,78],"deco":"paper","desc":"Claude 的宪法档案室，暖光与稿纸纷飞"},{"id":"starcat","name":"星海猫窝","top":[20,16,56],"bot":[66,40,116],"ground":[34,26,76],"grid":[126,104,208],"deco":"star","desc":"Gemini 的星海，猫耳剪影与流星划过"},{"id":"teahouse","name":"青瓷茶庭","top":[14,36,44],"bot":[40,88,88],"ground":[22,52,56],"grid":[92,158,150],"deco":"teacup","desc":"千问的茶庭，青瓷盏与流苏垂落"},{"id":"observatory","name":"月相观星台","top":[12,16,40],"bot":[40,44,92],"ground":[22,26,58],"grid":[96,108,176],"deco":"moon","desc":"Kimi 的观星台，月相缓缓轮转"},{"id":"foxden","name":"狐眠书斋","top":[16,20,44],"bot":[36,48,92],"ground":[24,30,62],"grid":[86,116,172],"deco":"zzz","desc":"GLM 的书斋，Z 字与狐火打盹"},{"id":"gothic","name":"哥特机房","top":[34,12,24],"bot":[88,30,40],"ground":[48,18,30],"grid":[176,88,76],"deco":"gothic","desc":"Grok Ani 的机房，尖拱窗与红色数据流"},{"id":"terminal","name":"训练终端","top":[16,18,38],"bot":[42,28,72],"ground":[28,30,56],"grid":[70,74,120],"deco":"plain","desc":"中性训练场，无装饰，最省性能"}],"arena_effects":{"none":{"name":"纯净","desc":"无额外机制，纯视觉","color":[150,156,196]},"center_rage":{"name":"中央聚气","desc":"站在中场每秒 +10 气","color":[255,196,72]},"edge_slow":{"name":"边缘迟滞","desc":"靠近两侧 15% 区域移速 -25%","color":[150,190,255]},"energy_orb":{"name":"能量球","desc":"每 6 秒刷新一颗，拾取回 50 血 / 40 气","color":[140,235,200]},"low_gravity":{"name":"低重力","desc":"重力 ×0.65，被击飞后浮空更久","color":[180,160,255]},"wind":{"name":"周期风场","desc":"每 8 秒交替左右推送角色","color":[120,210,255]},"heal_zone":{"name":"中央疗愈","desc":"站中场每秒回 0.6% 最大血","color":[96,226,140]}},"status_info":{"stun":["定身",[255,110,110]],"slow":["减速",[150,190,255]],"silence":["沉默",[200,150,255]],"sleep":["催眠",[160,160,220]],"super_armor":["霸体",[255,190,90]],"cleanse_immune":["免控",[140,235,200]],"buff_atk":["强化",[255,216,110]],"buff_speed":["迅捷",[140,235,255]],"shield":["护盾",[120,210,255]],"counter_ready":["替身",[255,160,200]]},"const":{"BASE_HP":1000,"RAGE_MAX":300,"RAGE_PER_GRID":100,"RAGE_ON_HIT":16,"RAGE_ON_TAKE":11,"MOVE_SPEED":5.0,"JUMP_V":-16.0,"GRAVITY":0.78,"GROUND_Y":516,"BODY_W":56,"BODY_H":96,"ATK_REACH":78,"DODGE_DIST":78,"DODGE_INVULN":14,"DODGE_CD":72,"CLEANSE_CD":300,"CLEANSE_IMMUNE":90,"SCROLL_CD_FALLBACK":360,"FPS":60,"COMBO_TIMEOUT":100,"HURT_FRAMES":16,"ATK_STARTUP":4,"ATK_ACTIVE":6,"ATK_RECOVERY":6,"ATK_CD":4,"TRANSFORM_COST":300,"AI_THINK_FRAMES":11,"AI_ENGAGE":132,"AI_FAR":300,"AI_ULT_RAGE":200,"AI_ULT_EVERY":5,"AI_DODGE_EVERY":3,"AI_SCROLL_EVERY":22}}</script>
 <script>
 /* =============================================================================
  * AI娘大乱斗 · 手机版 H5 · 游戏逻辑
@@ -322,6 +333,79 @@ const CFG = {
   // 本机战绩存档键
   STATS_KEY: 'aimusume_h5_stats_v1',
   W: 1280, H: 720,                      // 战斗世界坐标（只用于绘制）
+
+  // ---------- ②-a 三条道（y 轴 / 深度）：跟火影手游一样上中下三路 ----------
+  // lane 0=前道(画面靠下、略大) 1=中道 2=后道(画面靠上、略小)
+  LANE_NAME: ['前道', '中道', '后道'],
+  LANE_DY: [46, 0, -44],               // 每条道相对地面基线的绘制偏移
+  LANE_SCALE: [1.07, 1.0, 0.92],      // 近大远小，强化纵深感
+  LANE_CD: 18,                         // 换道冷却（帧），防一帧连跳两道
+  LANE_MOVE_LOCK: 6,                  // 换道后短暂锁左右移动，避免斜冲
+  // ---------- ②-b z 轴（高度）：跳跃删除，z 轴只由技能触发 ----------
+  // z = 离地像素，zv = 垂直速度（正数向上）；玩家不能主动跳。
+  //   launch 击飞 → 目标 z>0 浮空；sweep 扫地 → 只打浮空目标并加伤；
+  //   slam 砸地 → 把浮空目标砸落；zHop → 释放者自己跃起（可够到相邻道）。
+  Z_HOP_FRAMES: 30,                    // 技能跃起持续帧数
+  Z_HOP_MAX: 96,                       // 跃起最高像素
+  Z_GRAVITY: 0.62,                     // 浮空 / 跃起的下落重力
+  SUB_CD: 720,                         // 替身术 CD（12 秒）
+  SUB_RAGE: 100,                       // 替身术耗 1 格气
+  SUB_COUNTER: 0.6,                    // 替身反击伤害系数
+  ATK_CHAIN_MAX: 3,                    // 普攻三段（火影式连 A）
+  ATK_CHAIN_WINDOW: 42,                // 连段窗口（帧）
+  ATK3_LAUNCH: 13,                     // 第三段击飞初速（z 轴）
+  FORM_WINDOW: 240,                    // 技1 命中后，技2 强化形态持续帧
+  FORM_DMG: 1.30,                      // 强化形态伤害倍率
+  FORM_RADIUS: 1.25,                   // 强化形态范围倍率
+  SWEEP_BONUS: 1.35,                   // 扫地（打浮空目标）伤害倍率
+  SLAM_BONUS: 1.25,                    // 砸地（把浮空目标砸落）伤害倍率
+};
+
+/* ============================================================================
+ * ②-c 火影化技能表（H5 专属叠加层，规则表 JSON 一个字不用改）
+ * ----------------------------------------------------------------------------
+ * lane   : 'same' 只打同一条道 | 'adjacent' 可打相邻道 | 'all' 三道全打
+ * zHop   : 1 释放时自身沿 z 轴跃起（跃起期间可够到相邻道）
+ * launch : 把命中目标击飞到 z>0（数值 = 初速，正数向上）
+ * sweep  : 只打浮空目标，伤害 ×倍率（扫地追击，火影浮空连段）
+ * slam   : 把浮空目标砸落并追加伤害
+ * grab   : 抓取，无视防御 / 破霸体，并把目标拉到自己这条道
+ * form   : 技1 命中后本技能进入「强化形态」（伤害/范围提升 + 附加控制）
+ * 加带 z 轴的新技能：在对应角色对应槽位加字段即可；缺省走 DEFAULT_FIRE。
+ * 平衡数值全在 CFG 上面那一组常量里，改这里只改「谁有哪个特性」。
+ * ========================================================================== */
+const SKILL_FIRE = {
+  DEFAULT_FIRE: {
+    s1:  { lane:'same' },
+    s2:  { lane:'adjacent', form:1 },
+    s3:  { lane:'adjacent', zHop:1, sweep:CFG.SWEEP_BONUS },
+    ult: { lane:'all', zHop:1, launch:16 },
+    atk: { lane:'same' },
+  },
+  deepseek: { // 鲸鱼娘：技1 挂饭粒 → 技2 飞弹强化 → 技3 鲸尾击飞 + 扫地
+    s1:{lane:'same'}, s2:{lane:'adjacent',form:1},
+    s3:{lane:'adjacent',zHop:1,launch:13,sweep:1.40}, ult:{lane:'all',zHop:1,launch:17}},
+  chatgpt: { // 白龙娘：龙角抓取破霸体，全家桶砸地
+    s1:{lane:'same'}, s2:{lane:'adjacent',form:1},
+    s3:{lane:'adjacent',zHop:1,grab:1,sweep:0}, ult:{lane:'all',launch:15,slam:1}},
+  claude: { // 小 C：结界控场，压书砸落浮空目标
+    s1:{lane:'same'}, s2:{lane:'adjacent',form:1,slam:1},
+    s3:{lane:'adjacent',zHop:1,slam:1,sweep:0}, ult:{lane:'all',grab:1,launch:16}},
+  gemini: { // 猫娘：分身突进跃起，星爆击飞 + 扫地
+    s1:{lane:'same'}, s2:{lane:'adjacent',form:1,zHop:1},
+    s3:{lane:'adjacent',zHop:1,launch:12,sweep:1.40}, ult:{lane:'all',launch:16}},
+  qwen: { // 千问：流苏远掷抓取，青瓷回旋扫地
+    s1:{lane:'same'}, s2:{lane:'adjacent',form:1,grab:1},
+    s3:{lane:'adjacent',zHop:1,sweep:1.35}, ult:{lane:'all',zHop:1,launch:15}},
+  kimi: { // 月相：星轨位移跃起，引月抓取拉回同道
+    s1:{lane:'same'}, s2:{lane:'adjacent',form:1,zHop:1},
+    s3:{lane:'adjacent',zHop:1,grab:1,sweep:0}, ult:{lane:'all',launch:15,slam:1}},
+  glm: { // 狐狸娘：黑书压顶砸落，全域休眠击飞
+    s1:{lane:'same'}, s2:{lane:'adjacent',form:1,slam:1},
+    s3:{lane:'adjacent',zHop:1,sweep:0}, ult:{lane:'all',launch:15}},
+  grok: { // Ani：巨斧横扫够到相邻道，哥特冲锋抓取破霸体
+    s1:{lane:'adjacent'}, s2:{lane:'adjacent',form:1},
+    s3:{lane:'adjacent',zHop:1,grab:1,sweep:0}, ult:{lane:'all',launch:16,slam:1}},
 };
 
 // ======================== 工具函数 ========================
@@ -336,10 +420,27 @@ function toast(msg, ms) {
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms || 1700);
 }
 function spec(cid, slot) {
-  // 与电脑版 skill_spec 一致：基础值 + 角色自定义覆盖
+  // 基础值 + 角色自定义 + 火影化空间层（道/z轴/形态）；规则表 JSON 不动
   const base = Object.assign({}, RULES.skill_base[slot] || RULES.skill_base.s1);
   const kit = RULES.skill_kits[cid] || RULES.skill_kits.deepseek;
-  return Object.assign(base, (kit.skills && kit.skills[slot]) || {});
+  const fire = (SKILL_FIRE[cid] && SKILL_FIRE[cid][slot]) || {};
+  return Object.assign(base, (kit.skills && kit.skills[slot]) || {},
+                       SKILL_FIRE.DEFAULT_FIRE[slot] || {}, fire);
+}
+// 道命中判定：同路才能打；跨道技能 / 奥义 / 自身跃起或浮空时可够到相邻道
+function laneHit(src, dst, mode) {
+  const d = Math.abs((src.lane | 0) - (dst.lane | 0));
+  const m = mode || 'same';
+  if (m === 'all') return true;
+  if (m === 'adjacent' || src.zHop > 0 || src.z > 0) return d <= 1;
+  return d === 0;
+}
+// 飞弹按【发射瞬间】那条道判定：换了道就能躲掉已经飞过来的弹
+function projLaneHit(p, o) {
+  const m = p.lane || 'same';
+  if (m === 'all') return true;
+  const d = Math.abs((p.ownerLane | 0) - (o.lane | 0));
+  return m === 'adjacent' ? d <= 1 : d === 0;
 }
 function kitOf(cid) { return RULES.skill_kits[cid] || RULES.skill_kits.deepseek; }
 function shortName(cid, slot) {
@@ -356,8 +457,10 @@ const S = {
   paused: false, over: false, winner: 0, t: 0, timeLeft: CFG.ROUND_SEC,
   f: [null, null],          // [P1, P2]
   proj: [], fx: [], floats: [], particles: [],
-  input: { dir: 0, up: false, down: false },
-  aiTick: 0, aiCache: { held: 0, acts: [] },
+  // dir=左右(x轴)；up/down=摇杆上下(换道/防御)；lanePulse=本帧换道请求
+  // laneArmed：摇杆越过上下阈值时只发一次换道，按住不会一帧连跳两道
+  input: { dir: 0, up: false, down: false, lanePulse: 0, laneArmed: true },
+  aiTick: 0, aiCache: { held: 0, acts: [], lane: 0 },
   orb: null, windDir: 1,
   netEvents: [],            // host 本帧产生的浮字，随快照下发，guest 也能看到技能名/伤害
   net: { role: '', room: '', ws: null, pc: null, dc: null, open: false, buf: [] },
@@ -402,10 +505,30 @@ function makeF(side, cid, x) {
     combo: 0, comboT: 0, maxCombo: 0, dmgDone: 0,
     pending: [], transform: false, atkHit: false, atkKind: '',
     passiveT: 0, passiveCd: 0,
+    // --- 三条道(y轴) + z轴高度 ---
+    lane: 1, z: 0, zv: 0, zHop: 0, airborne: 0, laneCd: 0, laneLock: 0,
+    subCd: 0, formT: 0, atkChain: 0, atkChainT: 0,
   };
 }
+// 换道：一次一格、带冷却，换完短暂锁左右移动；联网 guest 由 host 代跑
+function doLane(f, dir) {
+  // 浮空(z>0)时不能换道：被击飞的人只能等落地，这是 z 轴连段的代价
+  if (!f || !canAct(f) || f.laneCd > 0 || f.busy > 0 || f.z > 0) return false;
+  const n = clamp((f.lane | 0) + dir, 0, CFG.LANE_NAME.length - 1);
+  if (n === f.lane) return false;
+  f.lane = n; f.laneCd = CFG.LANE_CD; f.laneLock = CFG.LANE_MOVE_LOCK;
+  floatAt(f.x, laneY(f) - 150, CFG.LANE_NAME[n], [140, 200, 255]);
+  circleFx(f.x, C.GROUND_Y + CFG.LANE_DY[n], 40, [120, 190, 255], 16);
+  return true;
+}
+// 绘制基线：地面 + 该道纵深偏移 - z 轴高度（浮空人往上、影子留地面）
+function laneY(f) { return C.GROUND_Y + CFG.LANE_DY[f.lane | 0] - (f.z || 0); }
+function laneScale(f) { return CFG.LANE_SCALE[f.lane | 0] || 1; }
 function other(f) { return S.f[f.side === 1 ? 1 : 0]; }
-function canAct(f) { return !f.status.stun && !f.status.sleep && f.hp > 0; }
+// airborne 只由「被击飞(launch)」设置；技能自身 zHop 跃起不算，仍可出招
+function canAct(f) {
+  return !f.status.stun && !f.status.sleep && f.hp > 0 && !(f.airborne && f.z > 0);
+}
 function canSkill(f) { return canAct(f) && !f.status.silence; }
 function addStatus(f, name, frames, val) {
   if ((name === 'stun' || name === 'slow' || name === 'silence' || name === 'sleep' || name === 'mark')
@@ -429,18 +552,29 @@ function damageOf(src, sp) {
 function hit(src, dst, dmg, opt) {
   opt = opt || {};
   if (dst.invuln > 0 || dst.hp <= 0) return false;
+  // 三条道(y轴)：不同路默认打不到；跨道技能 / 奥义 / 跃起由 lane 放行
+  if (opt.laneCheck !== false && !laneHit(src, dst, opt.lane)) return false;
+  // 扫地(sweep)：对浮空目标加伤（不限制地面命中，否则主力技在地面会全 miss）。
+  // 想做「专门只打浮空」的扫地技，给技能加 sweepOnly:1 即可，这是预留的 z 轴接口。
+  if (opt.sweepOnly && dst.z <= 0) return false;
   if (dst.dodgeInv > 0) {                       // 闪避成功：回气
-    src.rage = clamp(src.rage + 0, 0, C.RAGE_MAX);
     dst.rage = clamp(dst.rage + 8, 0, C.RAGE_MAX);
-    floatAt(dst.x, dst.y - 130, '闪避', [140, 235, 255]);
+    floatAt(dst.x, laneY(dst) - 130, '闪避', [140, 235, 255]);
     return false;
   }
-  // 被动：宪法减伤（单次超过 120 的部分减 val）
   const pk = kitOf(dst.cid).passive;
   if (pk.type === 'damage_cap' && dmg > 120) dmg = 120 + (dmg - 120) * (1 - pk.val);
-  if (has(dst, 'super_armor') && opt.pierceArmor) dmg *= 1.2;
-  if (dst.guard && !opt.breakGuard) dmg *= 0.1;
+  // 抓取(grab)：无视防御、破霸体，并把目标拉回自己这条道
+  const grabbed = !!opt.grab;
+  if (grabbed) { dst.guard = false; dst.lane = src.lane; dst.laneCd = CFG.LANE_CD; }
+  if (has(dst, 'super_armor') && (opt.pierceArmor || grabbed)) dmg *= 1.2;
+  if (dst.guard && !opt.breakGuard && !grabbed) dmg *= 0.1;
   if (has(dst, 'buff_atk')) dmg *= 1.1;         // 强化期间自身易伤
+  if (dst.z > 0 && opt.sweep) dmg *= (opt.sweep || CFG.SWEEP_BONUS);
+  let slammed = false;
+  if (dst.z > 0 && opt.slam) {
+    dmg *= CFG.SLAM_BONUS; dst.z = 0; dst.zv = 0; dst.airborne = 0; slammed = true;
+  }
   if (has(dst, 'shield')) {                     // 护盾吸收
     const sh = dst.status.shield_v || 0;
     const use = Math.min(sh, dmg); dst.status.shield_v = sh - use; dmg -= use;
@@ -457,22 +591,31 @@ function hit(src, dst, dmg, opt) {
   if (!has(dst, 'super_armor')) { dst.state = 'hurt'; dst.stateT = 0; dst.hurtT = C.HURT_FRAMES; }
   dst.invuln = 8;
   dst.vx += (src.facing || 1) * (opt.knock || 6);
-  if (opt.launch) { dst.vy = opt.launch; dst.y -= 2; }
+  // 击飞(z 轴)：只由技能触发，玩家不能主动跳；launch 正负都兼容
+  if (opt.launch) {
+    dst.zv = Math.max(dst.zv, Math.abs(opt.launch));
+    dst.z = Math.max(dst.z, 4); dst.airborne = 1; dst.guard = false;
+  }
   if (opt.status) addStatus(dst, opt.status, opt.statusFrames || 40, opt.statusVal || 0);
-  if (opt.mark) { dst.mark = 180; }
-  // 被动：毒舌反伤
+  if (opt.mark) dst.mark = 180;
+  // 技1 命中 → 开启「强化形态」窗口，接下来的技2/技3 会变形
+  if (opt.formOpen && !linkedFormUsed(src)) {
+    src.formT = CFG.FORM_WINDOW;
+    floatAt(src.x, laneY(src) - 150, '形态变化！', [255, 208, 96]);
+  }
   if (pk.type === 'reflect') src.hp = Math.max(0, src.hp - Math.round(dmg * pk.val));
-  // 替身：受击自动反击
   if (has(dst, 'counter_ready')) {
     delete dst.status.counter_ready;
     src.hp = Math.max(0, src.hp - Math.round(dmg * 0.6));
-    floatAt(dst.x, dst.y - 130, '替身', [255, 160, 200]);
+    floatAt(dst.x, laneY(dst) - 130, '替身', [255, 160, 200]);
   }
-  floatAt(dst.x, dst.y - 110, '-' + dmg, src.ch.aura);
-  burst(dst.x, dst.y - 50, src.ch.aura, 12);
-  if (opt.label) floatAt((src.x + dst.x) / 2, dst.y - 150, opt.label, [255, 208, 96]);
+  floatAt(dst.x, laneY(dst) - 110, '-' + dmg, src.ch.aura);
+  burst(dst.x, laneY(dst) - 50, src.ch.aura, 12);
+  if (slammed) floatAt(dst.x, laneY(dst) - 150, '砸地', [255, 180, 120]);
+  if (opt.label) floatAt((src.x + dst.x) / 2, laneY(dst) - 150, opt.label, [255, 208, 96]);
   return true;
 }
+function linkedFormUsed(src) { return src.formT > 0; }   // 形态窗口内不重复刷新增益
 function floatAt(x, y, text, col) {
   S.floats.push({ x: x, y: y, text: text, col: col, t: 46 });
   if (S.mode === 'online' && S.net.role === 'host') {
@@ -491,15 +634,27 @@ function circleFx(x, y, r, col, t) { S.fx.push({ kind: 'ring', x: x, y: y, r: r,
 
 function cast(f, action) {
   if (S.over || S.paused || !canSkill(f) || f.busy > 0) return false;
-  const sp = spec(f.cid, action);
-  const cdKey = action;
-  if ((f.cd[cdKey] || 0) > 0 || f.rage < (sp.rage || 0)) return false;
+  let sp = spec(f.cid, action);
+  if ((f.cd[action] || 0) > 0 || f.rage < (sp.rage || 0)) return false;
+  // 火影式「形态变化」：技1 命中后一段时间内，带 form 的技能变强化版
+  if (sp.form && f.formT > 0) {
+    sp = Object.assign({}, sp, {
+      dmg: Math.round((sp.dmg || 50) * CFG.FORM_DMG),
+      radius: Math.round((sp.radius || 120) * CFG.FORM_RADIUS),
+      reach: Math.round((sp.reach || 96) * CFG.FORM_RADIUS),
+      status: sp.status || 'stun', status_frames: sp.status_frames || 28,
+    });
+    f.formT = 0;
+    floatAt(f.x, laneY(f) - 150, '强化形态', [255, 208, 96]);
+  }
   f.rage -= sp.rage || 0;
-  f.cd[cdKey] = sp.cd || 96;
+  f.cd[action] = sp.cd || 96;
   f.busy = (sp.startup || 4) + (sp.active || 6) + (sp.recovery || 10);
   f.pending.push({ t: sp.startup || 4, action: action, sp: sp });
   f.state = 'atk'; f.stateT = 0;
-  floatAt(f.x, f.y - 124, sp.name || action, f.ch.aura);
+  // z 轴跃起：技能自带，不是跳跃键；跃起期间可够到相邻道
+  if (sp.zHop) { f.zHop = CFG.Z_HOP_FRAMES; f.z = Math.max(f.z, 2); }
+  floatAt(f.x, laneY(f) - 124, sp.name || action, f.ch.aura);
   return true;
 }
 function resolveSkill(f, ps) {
@@ -512,55 +667,67 @@ function resolveSkill(f, ps) {
     const lk = sp.link || {};
     extra = lk.dmg || 26; st = lk.status || 'stun'; stF = lk.frames || 25;
     pierce = pierce || !!lk.pierce_armor;
-    floatAt(f.x, f.y - 160, '联动！', [255, 208, 96]);
+    floatAt(f.x, laneY(f) - 160, '联动！', [255, 208, 96]);
   }
-  const opt = { knock: sp.knock || 6, launch: sp.launch || 0, mark: !!sp.tag,
+  // 统一空间层：三条道判定 + z 轴(击飞/扫地/砸地) + 抓取 + 形态开启
+  const space = {
+    lane: sp.lane || 'same', laneCheck: true,
+    knock: sp.knock || 6, mark: !!sp.tag,
     status: sp.status || st, statusFrames: sp.status_frames || stF,
-    pierceArmor: pierce, breakGuard: !!sp.break_guard, label: sp.name };
+    pierceArmor: pierce, breakGuard: !!sp.break_guard, label: sp.name,
+    launch: sp.launch || (linked && (sp.link || {}).launch) || 0,
+    sweep: sp.sweep || 0, slam: sp.slam || 0, grab: sp.grab || 0,
+    formOpen: ps.action === 's1' ? 1 : 0,
+  };
+  const H = dd => hit(f, o, dd, Object.assign({}, space));
   let any = false;
   switch (sp.kind) {
     case 'proj': case 'ult_proj': {
       const n = sp.count || 1;
       for (let i = 0; i < n; i++) {
-        S.proj.push({ x: f.x + f.facing * 40, y: f.y - 58 - i * 16,
-          vx: f.facing * (sp.proj || 11), vy: 0, owner: f, dmg: d / n,
-          col: f.ch.aura, label: sp.name, radius: sp.kind === 'ult_proj' ? 26 : 16,
-          life: 110, opt: Object.assign({}, opt) });
+        S.proj.push({
+          x: f.x + f.facing * 40, y: laneY(f) - 58 - i * 16,
+          vx: f.facing * (sp.proj || 11), vy: 0, owner: f,
+          ownerLane: f.lane, lane: sp.lane || 'same',
+          dmg: (d + extra) / n, col: f.ch.aura, label: sp.name,
+          radius: sp.kind === 'ult_proj' ? 26 : 16, life: 110,
+          space: Object.assign({}, space),
+        });
       }
-      circleFx(f.x + f.facing * 40, f.y - 58, 22, f.ch.aura, 14);
+      circleFx(f.x + f.facing * 40, laneY(f) - 58, 22, f.ch.aura, 14);
       break;
     }
     case 'dash_strike': {
       f.x = clamp(f.x + f.facing * 90, 60, CFG.W - 60);
-      circleFx(f.x, f.y - 50, 60, f.ch.aura, 16);
+      circleFx(f.x, laneY(f) - 50, 60, f.ch.aura, 16);
       if (Math.abs(o.x - f.x) < (sp.reach || 124)) {
-        any = hit(f, o, d + extra, Object.assign({}, opt));
+        any = H(d + extra);
         if (any && st) addStatus(o, st, stF);
       }
       break;
     }
     case 'aoe': case 'ult_aoe': {
       const r = sp.radius || 120;
-      circleFx(f.x, f.y - 50, r, f.ch.aura, 22);
+      circleFx(f.x, laneY(f) - 50, r, f.ch.aura, 22);
       if (Math.abs(o.x - f.x) < r) {
-        any = hit(f, o, d + extra, Object.assign({}, opt));
+        any = H(d + extra);
         if (any && st) addStatus(o, st, stF);
       }
       break;
     }
-    default: { // melee
+    default: { // melee：同路且高度差不过大才能打到
       const r = sp.reach || 96;
-      circleFx(f.x + f.facing * r * 0.5, f.y - 50, r * 0.6, f.ch.aura, 14);
-      if (Math.abs(o.x - f.x) < r && Math.abs(o.y - f.y) < 130) {
-        any = hit(f, o, d + extra, Object.assign({}, opt));
+      circleFx(f.x + f.facing * r * 0.5, laneY(f) - 50, r * 0.6, f.ch.aura, 14);
+      if (Math.abs(o.x - f.x) < r && Math.abs(laneY(o) - laneY(f)) < 140) {
+        any = H(d + extra);
         if (any && st) addStatus(o, st, stF);
       }
     }
   }
-  burst(f.x, f.y - 50, f.ch.aura, 14);
+  burst(f.x, laneY(f) - 50, f.ch.aura, 14);
 }
 
-// 普攻 / 跳 / 闪避 / 净化 / 秘卷
+// 普攻三段 / 替身术 / 闪避 / 净化 / 秘卷（跳跃键已删除）
 function act(side, action) {
   if (S.over || S.paused) return;
   const f = S.f[side - 1]; if (!f || !canAct(f)) return;
@@ -572,14 +739,43 @@ function act(side, action) {
 }
 function doAct(f, action) {
   if (action === 'atk') {
-    if (f.busy > 0 || (f.cd.atk || 0) > 0) return;
-    f.cd.atk = C.ATK_STARTUP + C.ATK_ACTIVE + C.ATK_RECOVERY + C.ATK_CD;
-    f.busy = C.ATK_STARTUP + C.ATK_ACTIVE + C.ATK_RECOVERY;
-    f.state = 'atk'; f.stateT = 0; f.atkHit = false;
-    f.pending.push({ t: C.ATK_STARTUP, action: 'atk', sp: { dmg: 42, reach: C.ATK_REACH, name: '普攻' } });
-    circleFx(f.x + f.facing * 50, f.y - 50, 34, f.ch.aura, 10);
-  } else if (action === 'jump') {
-    if (f.y >= C.GROUND_Y - 1) { f.vy = C.JUMP_V; f.state = 'jump'; }
+    // 火影式三段连 A：连点 1→2→3，第三段把对手击飞(z 轴)，可接扫地追击
+    if (f.busy > 0 || (f.cd.atk || 0) > 0 || f.z > 0) return;
+    const seg = (f.atkChainT > 0 ? f.atkChain + 1 : 1) > CFG.ATK_CHAIN_MAX
+      ? 1 : (f.atkChainT > 0 ? f.atkChain + 1 : 1);
+    f.atkChain = seg; f.atkChainT = CFG.ATK_CHAIN_WINDOW;
+    const dmg = [42, 45, 58][seg - 1] || 42;
+    const add = seg === 3 ? 8 : 0;
+    f.cd.atk = C.ATK_STARTUP + C.ATK_ACTIVE + C.ATK_RECOVERY + C.ATK_CD + add;
+    f.busy = C.ATK_STARTUP + C.ATK_ACTIVE + C.ATK_RECOVERY + add;
+    f.state = 'atk'; f.stateT = 0;
+    f.pending.push({ t: C.ATK_STARTUP, action: 'atk', sp: {
+      dmg: dmg, reach: C.ATK_REACH + (seg === 3 ? 14 : 0),
+      name: seg === 3 ? '普攻·第三段' : '普攻', lane: 'same', laneCheck: true,
+      launch: seg === 3 ? CFG.ATK3_LAUNCH : 0,
+      knock: seg === 3 ? 10 : 6, label: f.ch.skills.normal,
+    }});
+    circleFx(f.x + f.facing * 50, laneY(f) - 50, 34 + seg * 4, f.ch.aura, 10);
+    if (seg === 3) f.atkChainT = 0;
+  } else if (action === 'substitute') {
+    // 火影式替身术：受击/被控时按，耗 1 格气 → 换道瞬移 + 解控 + 反击
+    if (f.subCd > 0 || f.rage < CFG.SUB_RAGE || f.hp <= 0) return;
+    f.subCd = CFG.SUB_CD; f.rage -= CFG.SUB_RAGE;
+    ['stun','slow','silence','sleep','mark'].forEach(n => { delete f.status[n]; delete f.status[n+'_v']; });
+    f.mark = 0; f.hurtT = 0; f.busy = 0; f.pending = [];
+    f.invuln = Math.max(f.invuln, 20); f.dodgeInv = Math.max(f.dodgeInv, 20);
+    const dir = f.lane === 2 ? -1 : 1;
+    const n = clamp(f.lane + dir, 0, CFG.LANE_NAME.length - 1);
+    f.lane = n; f.laneCd = CFG.LANE_CD;
+    f.x = clamp(f.x - f.facing * 110, 60, CFG.W - 60);
+    f.z = 0; f.zv = 0; f.airborne = 0;
+    floatAt(f.x, laneY(f) - 140, '替身术！', [255, 160, 200]);
+    circleFx(f.x, C.GROUND_Y + CFG.LANE_DY[n], 56, [255, 160, 200], 20);
+    const o = other(f);
+    if (Math.abs(o.x - f.x) < 220 && laneHit(f, o, 'adjacent')) {
+      o.hp = Math.max(0, o.hp - Math.round(damageOf(f, { dmg: 60 }) * CFG.SUB_COUNTER));
+      floatAt(o.x, laneY(o) - 120, '替身反击', [255, 160, 200]);
+    }
   } else if (action === 'dodge') {
     if (f.dodgeCd > 0) return;
     f.dodgeCd = Math.max(30, Math.round(C.DODGE_CD *
@@ -587,13 +783,13 @@ function doAct(f, action) {
     f.dodgeInv = C.DODGE_INVULN; f.invuln = Math.max(f.invuln, C.DODGE_INVULN);
     f.x = clamp(f.x + (S.input.dir || -f.facing) * C.DODGE_DIST, 60, CFG.W - 60);
     f.state = 'dash'; f.stateT = 0;
-    floatAt(f.x, f.y - 120, '闪避', [140, 235, 255]);
+    floatAt(f.x, laneY(f) - 120, '闪避', [140, 235, 255]);
   } else if (action === 'cleanse') {
     if (f.cleanseCd > 0) return;
     f.cleanseCd = C.CLEANSE_CD;
     ['stun', 'slow', 'silence', 'sleep', 'mark'].forEach(n => { delete f.status[n]; delete f.status[n + '_v']; });
     f.mark = 0; addStatus(f, 'cleanse_immune', C.CLEANSE_IMMUNE);
-    floatAt(f.x, f.y - 120, '净化', [140, 235, 200]);
+    floatAt(f.x, laneY(f) - 120, '净化', [140, 235, 200]);
   } else if (action === 'scroll') {
     if (f.scrollCd > 0) return;
     const sc = RULES.scrolls[S.scrollName] || RULES.scrolls['霸体'];
@@ -604,17 +800,23 @@ function doAct(f, action) {
     else if (sc.kind === 'rage') f.rage = clamp(f.rage + (sc.val || 80), 0, C.RAGE_MAX);
     else if (sc.kind === 'cleanse') { ['stun','slow','silence','sleep'].forEach(n=>delete f.status[n]); }
     else if (sc.kind === 'aoe') {
-      circleFx(f.x, f.y - 50, sc.radius || 155, [255, 196, 72], 22);
-      if (Math.abs(o.x - f.x) < (sc.radius || 155)) hit(f, o, sc.dmg || 20, { status: sc.status, statusFrames: sc.frames });
+      circleFx(f.x, laneY(f) - 50, sc.radius || 155, [255, 196, 72], 22);
+      if (Math.abs(o.x - f.x) < (sc.radius || 155))
+        hit(f, o, sc.dmg || 20, { status: sc.status, statusFrames: sc.frames,
+          lane: 'all', laneCheck: true, label: sc.name });
     } else if (sc.kind === 'proj') {
-      S.proj.push({ x: f.x + f.facing * 40, y: f.y - 58, vx: f.facing * (sc.proj || 11), vy: 0,
-        owner: f, dmg: sc.dmg || 35, col: [255, 196, 72], label: sc.name, radius: 16, life: 110,
-        opt: { status: sc.status, statusFrames: sc.frames } });
+      const space = { lane: 'adjacent', laneCheck: true, label: sc.name,
+        status: sc.status, statusFrames: sc.frames, knock: 6 };
+      S.proj.push({ x: f.x + f.facing * 40, y: laneY(f) - 58,
+        vx: f.facing * (sc.proj || 11), vy: 0, owner: f, ownerLane: f.lane,
+        lane: 'adjacent', dmg: sc.dmg || 35, col: [255, 196, 72],
+        label: sc.name, radius: 16, life: 110, space: space });
     }
-    floatAt(f.x, f.y - 130, '秘卷·' + sc.name, [255, 208, 96]);
+    floatAt(f.x, laneY(f) - 130, '秘卷·' + sc.name, [255, 208, 96]);
   } else if (action === 'transform') {
     if (f.rage < C.TRANSFORM_COST || f.transform) return;
-    f.rage = 0; f.transform = true; floatAt(f.x, f.y - 140, '变身！', [255, 208, 96]);
+    f.rage = 0; f.transform = true;
+    floatAt(f.x, laneY(f) - 140, '变身！', [255, 208, 96]);
   } else if (action.indexOf('s') === 0 || action === 'ult') {
     cast(f, action);
   }
@@ -629,12 +831,35 @@ function aiThink() {
   let held = 0; const acts = [];
   if (dist > C.AI_ENGAGE) held = bot.x < foe.x ? 1 : -1;
   else if (dist < 54 && tick % 8 < 2) held = bot.x < foe.x ? -1 : 1;
+
+  // --- y 轴：电脑也会换道 ---
+  let lane = 0;
+  const gap = bot.lane - foe.lane;
+  if (bot.z <= 0 && bot.laneCd === 0) {
+    if (gap !== 0 && tick % 4 === 0)
+      lane = gap > 0 ? -1 : 1;            // 不同道 → 回同道才打得到
+    else if (gap === 0 && tick % 31 === 0)
+      lane = (Math.floor(tick / 31) % 2) ? 1 : -1;   // 周期性主动错位走位
+    else if (foe.state === 'atk' && dist < C.AI_FAR && tick % 3 === 0)
+      lane = tick % 2 ? 1 : -1;          // 对面出招 → 错位躲
+  }
+  const sameLane = gap === 0;
+
+  // 被控 / 浮空时优先替身，其次净化
+  if ((bot.status.stun || bot.status.sleep || bot.z > 0) &&
+      bot.subCd === 0 && bot.rage >= CFG.SUB_RAGE && tick % 5 === 0)
+    acts.push('substitute');
   if ((bot.status.stun || bot.status.silence || bot.status.sleep || bot.mark > 0) && bot.cleanseCd === 0)
     acts.push('cleanse');
   if (dist < C.AI_ENGAGE + 40 && foe.state === 'atk' && bot.dodgeCd === 0 && tick % C.AI_DODGE_EVERY === 0)
     acts.push('dodge');
   const free = s => (bot.cd[s] || 0) === 0;
-  if (dist > C.AI_FAR) {
+  if (!sameLane) {
+    // 不同道：只放能跨道的技能，避免原地空挥
+    if (bot.rage >= C.AI_ULT_RAGE && free('ult') && tick % C.AI_ULT_EVERY === 0) acts.push('ult');
+    else if (free('s2')) acts.push('s2');
+    else if (free('s3')) acts.push('s3');
+  } else if (dist > C.AI_FAR) {
     if (free('s2')) acts.push('s2'); else if (free('s1')) acts.push('s1'); else if (free('s3')) acts.push('s3');
   } else if (dist > C.AI_ENGAGE) {
     if (free('s1')) acts.push('s1'); else if (free('s3')) acts.push('s3'); else if (free('s2')) acts.push('s2');
@@ -644,7 +869,7 @@ function aiThink() {
     else if (free('s2')) acts.push('s2'); else if ((bot.cd.atk || 0) === 0) acts.push('atk');
   }
   if (bot.scrollCd === 0 && tick % C.AI_SCROLL_EVERY === 0) acts.push('scroll');
-  S.aiCache = { held: held, acts: acts };
+  S.aiCache = { held: held, acts: acts, lane: lane || (S.aiCache.lane || 0) };
 }
 
 // ======================== 场地机制 ========================
@@ -701,6 +926,12 @@ function step() {
     ['s1','s2','s3','ult','atk'].forEach(k => f.cd[k] = Math.max(0, (f.cd[k] || 0) - 1));
     f.dodgeCd = Math.max(0, f.dodgeCd - 1); f.cleanseCd = Math.max(0, f.cleanseCd - 1);
     f.scrollCd = Math.max(0, f.scrollCd - 1); f.busy = Math.max(0, f.busy - 1);
+    // 三道 / z 轴 / 火影化状态
+    f.laneCd = Math.max(0, f.laneCd - 1); f.laneLock = Math.max(0, f.laneLock - 1);
+    f.zHop = Math.max(0, f.zHop - 1);
+    f.subCd = Math.max(0, f.subCd - 1); f.formT = Math.max(0, f.formT - 1);
+    f.atkChainT = Math.max(0, f.atkChainT - 1);
+    if (f.atkChainT === 0) f.atkChain = 0;
     f.invuln = Math.max(0, f.invuln - 1); f.dodgeInv = Math.max(0, f.dodgeInv - 1);
     f.hurtT = Math.max(0, f.hurtT - 1); f.comboT = Math.max(0, f.comboT - 1);
     if (f.comboT === 0) f.combo = 0;
@@ -729,17 +960,34 @@ function step() {
       if (ps.t > 0) { still.push(ps); return; }
       if (ps.action === 'atk') {
         const o = other(f);
-        if (Math.abs(o.x - f.x) < ps.sp.reach && Math.abs(o.y - f.y) < 130)
-          hit(f, o, damageOf(f, ps.sp), { label: f.ch.skills.normal, knock: 6 });
+        if (Math.abs(o.x - f.x) < ps.sp.reach && Math.abs(laneY(o) - laneY(f)) < 140)
+          hit(f, o, damageOf(f, ps.sp), ps.sp);   // 第三段带 launch → 击飞
       } else resolveSkill(f, ps);
     });
     f.pending = still;
   });
 
-  // --- 移动 / 物理 ---
+  // --- 换道(y 轴)：摇杆上下 / AI / 远端，每帧各消费一次 ---
+  const p1Lane = S.input.lanePulse;
+  const p2Lane = S.mode === 'solo' ? (S.aiCache.lane || 0) : (S.net.remoteLane || 0);
+  S.input.lanePulse = 0; S.net.remoteLane = 0;
+  if (p1Lane && S.f[0]) doLane(S.f[0], p1Lane);
+  if (p2Lane && S.f[1]) {
+    const bot = S.f[1];
+    // AI 正在出招 / 换道冷却 / 浮空中：请求排队，等空闲帧再走
+    if (S.mode === 'solo' && (bot.busy > 0 || bot.laneCd > 0 || bot.z > 0)) {
+      S.aiCache.lane = p2Lane;
+    } else {
+      doLane(bot, p2Lane);
+      if (S.mode === 'solo') S.aiCache.lane = 0;
+    }
+  }
+
+  // --- 移动 / z 轴物理 ---
   S.f.forEach((f, i) => {
     const d = i === 0 ? d1 : d2;
-    const can = canAct(f) && f.busy === 0 && f.hurtT === 0;
+    const grounded = f.z <= 0;
+    const can = canAct(f) && f.busy === 0 && f.hurtT === 0 && grounded && f.laneLock === 0;
     if (can && d !== 0) {
       let sp = C.MOVE_SPEED * (f.ch.stats.speed || 1);
       if (has(f, 'slow')) sp *= 0.62;
@@ -749,24 +997,32 @@ function step() {
       f.x = clamp(f.x + d * sp, 60, CFG.W - 60);
       f.state = 'run';
     }
-    f.guard = can && S.input.down && i === 0 && f.y >= C.GROUND_Y - 1;
+    f.guard = can && i === 0 && S.input.down && grounded;
     if (f.state === 'idle' || f.state === 'run' || f.state === 'guard' || f.state === 'jump') {
       const o = other(f); f.facing = o.x >= f.x ? 1 : -1;
     }
-    const g = C.GRAVITY * (S.effect === 'low_gravity' ? 0.65 : 1);
-    f.vy += g; f.y += f.vy; f.x += f.vx; f.vx *= 0.82;
-    if (f.y >= C.GROUND_Y) { f.y = C.GROUND_Y; f.vy = 0; if (f.state === 'jump') f.state = 'idle'; }
+    // z 轴：技能跃起(zHop) 走抛物线；被击飞(launch) 走重力下落。
+    // 玩家没有跳跃键，离地全部由技能触发。
+    if (f.zHop > 0) {
+      const k = 1 - f.zHop / CFG.Z_HOP_FRAMES;
+      f.z = Math.max(f.z, CFG.Z_HOP_MAX * Math.sin(Math.PI * k));
+    } else if (f.z > 0 || f.zv > 0) {
+      f.z += f.zv;
+      f.zv -= CFG.Z_GRAVITY * (S.effect === 'low_gravity' ? 0.65 : 1);
+      if (f.z <= 0) { f.z = 0; f.zv = 0; f.airborne = 0; }
+    }
+    f.x += f.vx; f.vx *= 0.82;
     f.x = clamp(f.x, 60, CFG.W - 60);
-    if (f.busy === 0 && f.hurtT === 0 && f.state !== 'jump') f.state = f.guard ? 'guard' : 'idle';
+    if (f.busy === 0 && f.hurtT === 0 && f.state !== 'jump')
+      f.state = f.guard ? 'guard' : 'idle';
   });
-  // 地面不能互相穿过；空中可以跳过绕背（与电脑版 v3.5 同一套扫掠检测）
+  // 只有【同一条道 + 都落地】才互相推开；不同道可擦肩而过，浮空不推
   const a = S.f[0], b = S.f[1];
-  if (a.y >= C.GROUND_Y - 2 && b.y >= C.GROUND_Y - 2) {
+  if (a.lane === b.lane && a.z <= 0 && b.z <= 0) {
     const lim = C.BODY_W * 0.62;
     let d = b.x - a.x;
     const prev = S.prevD;
     if (prev !== undefined && prev * d < 0 && Math.abs(d) < C.BODY_W * 3) {
-      // 一帧内左右关系翻转 = 穿过去了，按翻转前的次序拉回最小间距
       const sign = prev > 0 ? 1 : -1, mid = (a.x + b.x) / 2;
       a.x = mid - sign * lim / 2; b.x = mid + sign * lim / 2;
     } else if (Math.abs(d) < lim) {
@@ -776,7 +1032,7 @@ function step() {
     a.x = clamp(a.x, 60, CFG.W - 60); b.x = clamp(b.x, 60, CFG.W - 60);
     S.prevD = b.x - a.x;
   } else {
-    S.prevD = b.x - a.x;   // 空中完全不推，保留绕背
+    S.prevD = b.x - a.x;
   }
   tickArena();
 
@@ -784,8 +1040,11 @@ function step() {
   S.proj.forEach(p => {
     p.x += p.vx; p.y += p.vy; p.life--;
     const o = other(p.owner);
-    if (Math.abs(o.x - p.x) < p.radius + 24 && Math.abs(o.y - 58 - p.y) < 60) {
-      if (hit(p.owner, o, p.dmg, p.opt || {})) p.life = 0;
+    const sp = p.space || { lane: 'same', laneCheck: true };
+    // 飞弹只打【发射时那条道】：换了道就能错位躲开已经飞过来的弹
+    const yOk = Math.abs((laneY(o) - 58) - p.y) < 68;
+    if (Math.abs(o.x - p.x) < p.radius + 24 && yOk && projLaneHit(p, o)) {
+      if (hit(p.owner, o, p.dmg, sp)) p.life = 0;
     }
     if (p.x < 0 || p.x > CFG.W) p.life = 0;
   });
@@ -808,30 +1067,35 @@ function tickVisuals() {
   S.particles.forEach(e => { e.x += e.vx; e.y += e.vy; e.vy += 0.18; e.t--; });
   S.particles = S.particles.filter(e => e.t > 0);
 }
+// 快照字段：三道 / z 轴 / 火影化状态都要同步，否则 guest 看到的道和浮空会对不上
+const SNAP_KEYS = ['x','y','hp','rage','facing','state','guard','mark','transform',
+  'combo','status','cid','lane','z','zv','zHop','airborne','subCd','formT','atkChain'];
 function snapshot() {
   const ev = S.netEvents.splice(0);
   return {
     t: S.t, tl: S.timeLeft, over: S.over, w: S.winner, orb: S.orb, ev: ev,
-    f: S.f.map(f => ({ x: f.x, y: f.y, hp: f.hp, rage: f.rage, facing: f.facing,
-      state: f.state, guard: f.guard, vy: f.vy, mark: f.mark, transform: f.transform,
-      combo: f.combo, status: f.status, cid: f.cid })),
-    p: S.proj.map(p => ({ x: p.x, y: p.y, vx: p.vx, col: p.col, r: p.radius })),
+    f: S.f.map(f => {
+      const o = {}; SNAP_KEYS.forEach(k => o[k] = f[k]); return o;
+    }),
+    p: S.proj.map(p => ({ x: p.x, y: p.y, vx: p.vx, col: p.col, r: p.radius,
+      lane: p.lane, ownerLane: p.ownerLane })),
   };
 }
 function applySnapshot(s) {
   S.t = s.t; S.timeLeft = s.tl; S.over = s.over; S.winner = s.w; S.orb = s.orb;
-  // guest 视角：host 的 P2 就是「我」，所以交换双方，自己的按键才对应自己的角色
+  // guest 视角：host 的 P2 就是「我」，交换双方，自己的按键才对应自己的角色
   const order = S.net.role === 'guest' ? [1, 0] : [0, 1];
   order.forEach((src, dst) => {
     const d = s.f[src], f = S.f[dst]; if (!d || !f) return;
-    ['x','y','hp','rage','facing','state','guard','vy','mark','transform','combo'].forEach(k => f[k] = d[k]);
+    SNAP_KEYS.forEach(k => { if (d[k] !== undefined) f[k] = d[k]; });
     f.status = d.status || {};
     if (d.cid && f.cid !== d.cid) {
       const ch = RULES.characters.find(c => c.id === d.cid);
       if (ch) { f.cid = d.cid; f.ch = ch; }
     }
   });
-  S.proj = (s.p || []).map(p => ({ x: p.x, y: p.y, vx: p.vx, col: p.col, radius: p.r || 16, life: 1 }));
+  S.proj = (s.p || []).map(p => ({ x: p.x, y: p.y, vx: p.vx, col: p.col,
+    radius: p.r || 16, lane: p.lane, ownerLane: p.ownerLane, life: 1 }));
   (s.ev || []).forEach(e => S.floats.push({ x: e.x, y: e.y, text: e.text, col: e.col, t: 46 }));
 }
 function finish(w) {
@@ -857,10 +1121,15 @@ window.addEventListener('orientationchange', () => setTimeout(resize, 120));
 
 function drawFighter(f) {
   const col = f.ch.color, acc = f.ch.accent, aura = f.ch.aura;
-  const x = f.x, y = f.y, dir = f.facing;
-  ctx.save(); ctx.translate(x, y); ctx.scale(dir, 1);
-  // 影子
-  ctx.fillStyle = 'rgba(0,0,0,.38)'; ctx.beginPath(); ctx.ellipse(0, 2, 34, 9, 0, 0, 7); ctx.fill();
+  const dir = f.facing, sc = laneScale(f);
+  const baseY = C.GROUND_Y + CFG.LANE_DY[f.lane | 0];   // 该道地面：影子留这里
+  const bodyY = baseY - (f.z || 0);                      // z 轴：被击飞时人往上抬
+  const sh = clamp(1 - (f.z || 0) / 220, 0.35, 1);
+  // 影子固定在道上，浮空越高越小越淡（一眼看出 z 轴高度）
+  ctx.save(); ctx.globalAlpha = 0.4 * sh; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(f.x, baseY + 2, 34 * sc * sh, 9 * sc * sh, 0, 0, 7); ctx.fill();
+  ctx.restore();
+  ctx.save(); ctx.translate(f.x, bodyY); ctx.scale(dir * sc, sc);
   // 腿
   ctx.fillStyle = '#f5e4d6'; [-13, 5].forEach(px => { ctx.fillRect(px, -34, 14, 34); });
   // 身体 / 裙
@@ -904,15 +1173,21 @@ function draw() {
   const g = ctx.createLinearGradient(0, 0, 0, CFG.H);
   g.addColorStop(0, rgb(arena.top)); g.addColorStop(1, rgb(arena.bot));
   ctx.fillStyle = g; ctx.fillRect(-VOX/VS, -VOY/VS, cv.width/VS, cv.height/VS);
-  // 地面 + 透视网格
-  ctx.fillStyle = rgb(arena.ground); ctx.fillRect(0, C.GROUND_Y, CFG.W, CFG.H - C.GROUND_Y);
-  ctx.strokeStyle = rgba(arena.grid, .3); ctx.lineWidth = 1;
+  // 三条道地面：后道最上、前道最下，各一条半透明带 + 道线（近大远小）
+  ctx.fillStyle = rgb(arena.ground);
+  ctx.fillRect(0, C.GROUND_Y - 50, CFG.W, CFG.H - C.GROUND_Y + 50);
+  CFG.LANE_DY.forEach((dy, li) => {
+    const y = C.GROUND_Y + dy;
+    ctx.fillStyle = rgba(arena.grid, li === 1 ? 0.10 : 0.06);
+    ctx.fillRect(0, y - 30, CFG.W, 60);
+    ctx.strokeStyle = rgba(arena.grid, li === 1 ? 0.55 : 0.32);
+    ctx.lineWidth = li === 1 ? 2 : 1;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CFG.W, y); ctx.stroke();
+  });
+  ctx.strokeStyle = rgba(arena.grid, .22); ctx.lineWidth = 1;
   for (let i = -6; i <= 18; i++) {
-    ctx.beginPath(); ctx.moveTo(CFG.W/2 + i*38, C.GROUND_Y); ctx.lineTo(CFG.W/2 + i*150, CFG.H); ctx.stroke();
-  }
-  for (let j = 0; j < 5; j++) {
-    const yy = C.GROUND_Y + 14 + j*j*11;
-    ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(CFG.W, yy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(CFG.W/2 + i*38, C.GROUND_Y - 50);
+    ctx.lineTo(CFG.W/2 + i*150, CFG.H); ctx.stroke();
   }
   // 场地装饰：气泡 / 书页 / 星点
   const deco = arena.deco || 'bubble';
@@ -931,8 +1206,9 @@ function draw() {
   S.proj.forEach(p => { ctx.fillStyle = rgb(p.col || [255,255,255]); ctx.beginPath();
     ctx.arc(p.x, p.y, p.radius || 16, 0, 7); ctx.fill();
     ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.lineWidth=2; ctx.stroke(); });
-  // 角色
-  S.f.forEach(f => { if (f) drawFighter(f); });
+  // 角色：后道先画、前道后画（近的盖住远的，纵深感）
+  S.f.slice().sort((p, q) => (q.lane | 0) - (p.lane | 0))
+    .forEach(f => { if (f) drawFighter(f); });
   // 粒子
   S.particles.forEach(p => { ctx.fillStyle = rgba(p.col, Math.max(0, p.t/30)); ctx.fillRect(p.x, p.y, 3, 3); });
   // 浮字
@@ -945,44 +1221,51 @@ function draw() {
 
 // ======================== HUD / 按钮状态 ========================
 const ACT_LABEL = { atk:'普攻', s1:'技1', s2:'技2', s3:'技3', ult:'奥义',
-  jump:'跳', dodge:'闪避', cleanse:'净化', scroll:'秘卷' };
+  substitute:'替身', dodge:'闪避', cleanse:'净化', scroll:'秘卷' };
 function updateHUD() {
   const a = S.f[0], b = S.f[1]; if (!a || !b) return;
-  $('#n1').textContent = 'P1 · ' + a.ch.short;
-  $('#n2').textContent = (S.mode === 'online' ? '对手 · ' : '电脑 · ') + b.ch.short;
+  $('#n1').textContent = 'P1 · ' + a.ch.short + ' · ' + CFG.LANE_NAME[a.lane | 0];
+  $('#n2').textContent = (S.mode === 'online' ? '对手 · ' : '电脑 · ') + b.ch.short + ' · ' + CFG.LANE_NAME[b.lane | 0];
   $('#hp1').style.width = (a.hp/a.maxHp*100) + '%';
   $('#hp2').style.width = (b.hp/b.maxHp*100) + '%';
   [a,b].forEach((f,i)=>{
     const bars = $$('#rg'+(i+1)+' b');
     bars.forEach((el,j)=>el.classList.toggle('on', f.rage >= (j+1)*C.RAGE_PER_GRID - 10));
   });
+  // 三道指示器：三格从左到右 = 前 / 中 / 后
+  [[a,'#lane1'],[b,'#lane2']].forEach(pair => {
+    $$(pair[1] + ' i').forEach((el,j)=>el.classList.toggle('on', (pair[0].lane|0) === j));
+  });
   $('#clock').textContent = Math.ceil(S.timeLeft);
   $('#meta').textContent = (S.mode==='online'?'联网 1v1':'单人 PVE') + ' · ' +
     (RULES.arenas[S.arenaIdx].name) + ' · ' + (RULES.arena_effects[S.effect].name) + ' · ' + S.scrollName;
   const kit = kitOf(a.cid);
-  $('#skillbar').innerHTML = ['s1','s2','s3','ult'].map(s =>
-    '<b>'+ACT_LABEL[s]+'</b> '+spec(a.cid,s).name).join('　') +
-    '　|　联动 <b>'+kit.link_from+'→'+kit.link_to+'</b>：'+kit.link_desc;
+  $('#skillbar').innerHTML = ['s1','s2','s3','ult'].map(s => {
+    const sp = spec(a.cid, s);
+    const tag = sp.lane === 'all' ? '全道' : (sp.lane === 'adjacent' ? '跨道' : '同道');
+    return '<b>'+ACT_LABEL[s]+'</b> '+sp.name+
+      '<i style="color:#9aa4d0;font-style:normal">['+tag+']</i>';
+  }).join('　') + '　|　联动 <b>'+kit.link_from+'→'+kit.link_to+'</b>：'+kit.link_desc;
   // 圆键 / 胶囊：名称 + CD + 气不足
-  $$('#keys .rk, #funcs .cap').forEach(el => {
+  $$('#keys .rk').forEach(el => {
     const ac = el.dataset.act; if (!ac) return;
     const f = a;
     let cd = 0, need = 0;
     if (ac === 'dodge') cd = f.dodgeCd;
     else if (ac === 'cleanse') cd = f.cleanseCd;
     else if (ac === 'scroll') cd = f.scrollCd;
+    else if (ac === 'substitute') { cd = f.subCd; need = CFG.SUB_RAGE; }
     else if (ac === 'atk') cd = f.cd.atk;
-    else if (ac !== 'jump') { cd = f.cd[ac] || 0; need = spec(f.cid, ac).rage || 0; }
+    else { cd = f.cd[ac] || 0; need = spec(f.cid, ac).rage || 0; }
     const lack = need > 0 && f.rage < need;
     el.classList.toggle('cd', cd > 0 || lack);
     const num = el.querySelector('.cdnum');
     if (num) num.textContent = cd > 0 ? (cd/CFG.FPS).toFixed(1) : (lack ? '缺气' : '');
-    // 大字 = 角色专属短名（白饭 / 飞弹 / 鲸尾…），小字 = 键盘键名
     const lab = el.querySelector('.lab');
     if (lab && (ac === 's1' || ac === 's2' || ac === 's3')) lab.textContent = shortName(f.cid, ac);
     const small = el.querySelector('small');
     if (small) small.textContent =
-      ({s1:'U',s2:'I',s3:'O',ult:'L',atk:'J',jump:'K',dodge:'Q',cleanse:'E',scroll:'Z'})[ac] || '';
+      ({s1:'U',s2:'I',s3:'O',ult:'L',atk:'J',substitute:'K',dodge:'Q',cleanse:'E',scroll:'Z'})[ac] || '';
   });
 }
 
@@ -998,7 +1281,78 @@ function bindPress(el, fn) {
   el.addEventListener('pointercancel', off);
   el.addEventListener('lostpointercapture', off);
 }
-$$('#keys .rk, #funcs .cap').forEach(el => bindPress(el, () => act(1, el.dataset.act)));
+$$('#keys .rk').forEach(el => bindPress(el, () => act(1, el.dataset.act)));
+
+// ======================== 火影式扇形按键布局 ========================
+// 9 个圆键全部按真实 CSS 像素定位：普攻在最右下，3 技能沿弧线向左上展开，
+// 金色奥义在弧顶，替身/闪避/净化/秘卷 4 个小圆收在弧线最左侧。
+// 自动加大弧间距直到两两不相交，再按屏幕可用区整体缩放（每键仍 ≥44px）。
+function layoutKeys() {
+  const cs = getComputedStyle(document.documentElement);
+  const gv = n => parseFloat(cs.getPropertyValue(n)) || 0;
+  const g = gv('--gap') || 8;
+  const D = {
+    atk: gv('--atk') || 96, s1: gv('--rk') || 70, s2: gv('--rk') || 70,
+    s3: gv('--rk') || 70, ult: gv('--ult') || 70,
+    substitute: gv('--mini') || 54, dodge: gv('--mini') || 54,
+    cleanse: gv('--mini') || 54, scroll: gv('--mini') || 54
+  };
+  const els = {};
+  $$('#keys .rk').forEach(el => { els[el.dataset.act] = el; });
+  const A = D.s1 + g;
+
+  function build(k) {
+    // 功能小圆收在簇顶部一排（火影的秘卷/替身位），不额外加宽整个簇，
+    // 这样 9 个键全部落在屏幕右下角，不会伸进中间的角色活动区。
+    const arcW = D.atk + g + D.s1 + A * 1.25 * k + D.s3;
+    const arcH = D.s1 + A * 1.55 * k + D.ult;
+    const miniH = D.substitute;
+    const W = arcW, H = miniH + g + arcH + 2;
+    const P = {
+      atk: { x: W - D.atk,                        y: H - D.atk,           d: D.atk },
+      s1:  { x: W - D.atk - g - D.s1,            y: H - D.s1,            d: D.s1 },
+      s2:  { x: W - D.atk - g - D.s1 - A*0.55*k, y: H - D.s1 - A*0.92*k, d: D.s2 },
+      s3:  { x: W - D.atk - g - D.s1 - A*1.25*k, y: H - D.s1 - A*0.92*k, d: D.s3 },
+      ult: { x: W - D.atk - g - D.s1 - A*0.35*k, y: H - D.s1 - A*1.55*k, d: D.ult }
+    };
+    ['substitute','dodge','cleanse','scroll']
+      .forEach((a,i) => { P[a] = { x: i*(D[a]+g), y: 0, d: D[a] }; });
+    return { W, H, P };
+  }
+  const hit = (a,b) => a.x < b.x+b.d && b.x < a.x+a.d && a.y < b.y+b.d && b.y < a.y+a.d;
+  let k = 1, out = build(k), tries = 0;
+  while (tries++ < 14) {
+    const ks = Object.keys(out.P); let bad = false;
+    for (let i=0;i<ks.length && !bad;i++)
+      for (let j=i+1;j<ks.length;j++)
+        if (hit(out.P[ks[i]], out.P[ks[j]])) { bad = true; break; }
+    if (!bad) break;
+    k += 0.07; out = build(k);
+  }
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let scale = Math.min(1, (vh - 56) / (out.H + 12), (vw * 0.50) / (out.W + 12));
+  if (!isFinite(scale) || scale <= 0) scale = 1;
+  const dia = a => Math.max(44, out.P[a].d * scale);   // 每个键单独兜底 ≥44px 可点
+  const gs = g * scale, MINI = ['substitute','dodge','cleanse','scroll'];
+  const box = $('#keys');
+  box.style.width  = Math.round(out.W * scale) + 'px';
+  box.style.height = Math.round(out.H * scale) + 'px';
+  Object.keys(out.P).forEach(a => {
+    const el = els[a]; if (!el) return;
+    const p = out.P[a], d = dia(a), mi = MINI.indexOf(a);
+    // 顶部 4 个小圆按兜底后的实际直径重排，避免整体缩小后挤成一团
+    const x = mi >= 0 ? mi * (d + gs) : p.x * scale;
+    const y = mi >= 0 ? 0 : p.y * scale;
+    el.style.width  = Math.round(d) + 'px';
+    el.style.height = Math.round(d) + 'px';
+    el.style.left   = Math.round(x) + 'px';
+    el.style.top    = Math.round(y) + 'px';
+  });
+  window.__aimLayout = { W:out.W*scale, H:out.H*scale, k, scale };
+}
+layoutKeys();
+['resize','orientationchange'].forEach(e => window.addEventListener(e, layoutKeys));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', layoutKeys);
 
 // 固定摇杆：底盘不动，只有头跟手指；多指互不干扰
 const pad = $('#pad'), knob = $('#knob');
@@ -1010,7 +1364,14 @@ function stickMove(e) {
   const len = Math.hypot(dx, dy); if (len > 1) { dx /= len; dy /= len; }
   knob.style.left = (50 + dx * 30) + '%'; knob.style.top = (50 + dy * 30) + '%';
   S.input.dir = Math.abs(dx) < CFG.STICK_DEAD ? 0 : (dx > 0 ? 1 : -1);
-  S.input.up = dy < -0.6; S.input.down = dy > 0.6;
+  // y 轴：上推=后道(+1)、下推=前道(-1)。只在刚越过阈值时发一次，按住不连跳
+  const up = dy < -0.62, down = dy > 0.62;
+  if ((up || down) && S.input.laneArmed) {
+    const d = up ? 1 : -1;
+    S.input.lanePulse = d; S.input.laneArmed = false;
+    if (S.mode === 'online' && S.net.open && S.net.role === 'guest') netSend({ k:'lane', d:d });
+  }
+  if (!up && !down && Math.abs(dy) < 0.35) S.input.laneArmed = true;
   if (S.mode === 'online' && S.net.open && S.net.role === 'guest') netSend({ k: 'dir', d: S.input.dir });
 }
 pad.addEventListener('pointerdown', e => {
@@ -1021,7 +1382,7 @@ pad.addEventListener('pointerdown', e => {
 pad.addEventListener('pointermove', e => { if (e.pointerId === stickId) stickMove(e); });
 function stickEnd(e) {
   if (e.pointerId !== stickId) return;
-  stickId = null; S.input.dir = 0; S.input.up = S.input.down = false;
+  stickId = null; S.input.dir = 0; S.input.down = false; S.input.laneArmed = true;
   knob.style.left = '50%'; knob.style.top = '50%';
   if (S.mode === 'online' && S.net.open && S.net.role === 'guest') netSend({ k:'dir', d:0 });
 }
@@ -1030,8 +1391,9 @@ pad.addEventListener('pointercancel', stickEnd);
 pad.addEventListener('lostpointercapture', stickEnd);
 
 // 键盘：电脑调试 / 外接键盘（4399 习惯），不影响手机 DOM 按键
-const KEY1 = { j:'atk', k:'jump', u:'s1', i:'s2', o:'s3', l:'ult', q:'dodge', e:'cleanse', z:'scroll' };
-const KEY2 = { '1':'atk','2':'jump','4':'s1','5':'s2','6':'s3','3':'ult','7':'dodge','8':'cleanse','9':'scroll' };
+// K / 2 从「跳」改成「替身」；W/S 改成换道（S 顺便保留防御）
+const KEY1 = { j:'atk', k:'substitute', u:'s1', i:'s2', o:'s3', l:'ult', q:'dodge', e:'cleanse', z:'scroll' };
+const KEY2 = { '1':'atk','2':'substitute','4':'s1','5':'s2','6':'s3','3':'ult','7':'dodge','8':'cleanse','9':'scroll' };
 window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (k === 'escape') { toggleOverlay('ovMenu'); return; }
@@ -1041,14 +1403,13 @@ window.addEventListener('keydown', e => {
   if (KEY2[k]) { act(2, KEY2[k]); e.preventDefault(); }
   if (k === 'a') S.input.dir = -1;
   if (k === 'd') S.input.dir = 1;
-  if (k === 's') S.input.down = true;
-  if (k === 'w') S.input.up = true;
+  if (k === 'w' && !e.repeat) S.input.lanePulse = 1;      // 后道
+  if (k === 's') { if (!e.repeat) S.input.lanePulse = -1; S.input.down = true; }  // 前道 + 防御
 });
 window.addEventListener('keyup', e => {
   const k = e.key.toLowerCase();
   if (k === 'a' || k === 'd') S.input.dir = 0;
   if (k === 's') S.input.down = false;
-  if (k === 'w') S.input.up = false;
 });
 
 // ======================== 房间码联网（WebRTC DataChannel） ========================
@@ -1087,6 +1448,7 @@ function wireDC(dc) {
     }
     else if (S.net.role === 'host' && m.k === 'in') doAct(S.f[1], m.a);
     else if (S.net.role === 'host' && m.k === 'dir') S.net.remoteDir = m.d;
+    else if (S.net.role === 'host' && m.k === 'lane') S.net.remoteLane = m.d;
     else if (S.net.role === 'host' && m.k === 'char') {
       // 客人自选角色：换掉房主这边的 P2（血量按比例保持）
       const ch = RULES.characters.find(c => c.id === m.cid);
@@ -1291,23 +1653,52 @@ $$('#modeRow .chip').forEach(b => b.addEventListener('click', () => {
   buildChips();
 }));
 function renderHelp() {
-  const kit = kitOf(RULES.characters[S.charIdx].id);
-  const names = ['s1','s2','s3','ult'].map(s => spec(RULES.characters[S.charIdx].id, s).name);
+  const cid = RULES.characters[S.charIdx].id;
+  const kit = kitOf(cid);
+  const rows = ['s1','s2','s3','ult'].map((s, i) => {
+    const sp = spec(cid, s);
+    const tag = sp.lane === 'all' ? '三道全打' : (sp.lane === 'adjacent' ? '可打相邻道' : '只打同道');
+    const zs = [];
+    if (sp.launch) zs.push('击飞');
+    if (sp.sweep) zs.push('扫地');
+    if (sp.slam) zs.push('砸地');
+    if (sp.grab) zs.push('抓取');
+    if (sp.zHop) zs.push('跃起');
+    if (sp.form) zs.push('形态变化');
+    return ['技1','技2','技3','奥义'][i] + '　<b>' + sp.name + '</b>　' + tag +
+      (zs.length ? '　<span style="color:#9aa4d0">[' + zs.join('/') + ']</span>' : '');
+  });
   $('#helpBody').innerHTML =
-    '<b>手机操作</b><br>左下固定摇杆＝左右移动（上＝上挑修饰，下＝防御）；' +
-    '右下大圆＝普攻，3 个圆＝角色专属技能，金色圆＝奥义；' +
-    '左下 2×2 胶囊＝跳 / 闪避 / 净化 / 秘卷。所有按键按真实手机像素绘制，不再从电脑布局缩小。<br><br>' +
+    '<b>三条道（y 轴）· 跟火影手游一样</b><br>' +
+    '摇杆<b>左右</b>＝前后走位；<b>上推一下＝去后道，下推一下＝去前道</b>，一次只走一格，' +
+    '换道有 ' + (CFG.LANE_CD/CFG.FPS).toFixed(2) + ' 秒冷却。' +
+    '顶部三格指示器显示双方各在哪条道。<b>不同道打不到彼此</b>——错位就是最实用的躲技能手段，' +
+    '飞弹也只认发射瞬间那条道。奥义与部分技能可跨道 / 全道，技能条后面标了 [同道]/[跨道]/[全道]。<br><br>' +
+    '<b>z 轴（高度）· 没有跳跃键</b><br>' +
+    '玩家不能主动跳。但<b>技能的 z 轴全部保留</b>：普攻第三段和部分技能会把对手<b>击飞</b>；' +
+    '「<b>扫地</b>」对浮空目标加伤 ×' + CFG.SWEEP_BONUS + '，用来接浮空连段；「<b>砸地</b>」把浮空目标砸落并加伤；' +
+    '标了「<b>跃起</b>」的技能会让释放者自己短暂离地（此时可够到相邻道）。' +
+    '浮空时不能换道、不能走位，只能用替身术脱身，这是被浮空的代价。<br><br>' +
     '<b>' + RULES.characters[S.charIdx].short + ' 的四个技能</b><br>' +
-    names.map((n,i)=>(['技1','技2','技3','奥义'][i])+'　'+n).join('<br>') +
-    '<br>联动 <b>' + kit.link_from + ' → ' + kit.link_to + '</b>：' + kit.link_desc + '<br><br>' +
-    '<b>键盘（电脑调试 / 外接键盘）</b><br>P1：A/D 移动，W 上挑，S 防御，J 普攻，K 跳，U/I/O 技1~3，L 奥义，Q 闪避，E 净化，Z 秘卷，P 暂停，Esc 菜单。<br>' +
-    'P2：数字 1/2 攻跳，4/5/6 技，3 奥义，7/8/9 功能，方向键移动。<br><br>' +
-    '<b>规则</b><br>每格气 100，奥义耗 2 格且 CD 长；闪避 CD 约 ' + (C.DODGE_CD/CFG.FPS).toFixed(1) +
-    ' 秒、有无敌帧，专门躲技能；净化解控并短时免控；秘卷在菜单里换。' +
-    '地面不能穿过对手，跳起来可越过绕背。PVE 电脑会靠近、放远程技、贴脸连招、被控净化。<br><br>' +
-    '<b>联网</b><br>菜单 → 房间码联机：一人「创建房间」，另一人输同一房间码「加入」。' +
-    '两台手机各管各的角色，不再同屏。部署 Cloudflare Worker 后自动连；没部署就把「本机码」发给对方、粘回「对方码」。<br><br>' +
-    '<b>右上角</b>「暂停 / 菜单」收起了原来挤在屏幕中间的 5 个按钮；菜单里可换角色、场地、机制、秘卷、看战绩。';
+    rows.join('<br>') + '<br>' +
+    '联动 <b>' + kit.link_from + ' → ' + kit.link_to + '</b>：' + kit.link_desc + '<br>' +
+    '<b>形态变化</b>：技1 命中后 ' + (CFG.FORM_WINDOW/CFG.FPS).toFixed(0) +
+    ' 秒内，技2/技3 变强化版（伤害 ×' + CFG.FORM_DMG + '、范围 ×' + CFG.FORM_RADIUS + ' 并附带控制）。<br><br>' +
+    '<b>按键（火影式扇形，全是圆键）</b><br>' +
+    '右下角最大的圆＝<b>普攻 J</b>（连点三段，第三段击飞）；沿弧线向左上依次是 ' +
+    '<b>技1 U / 技2 I / 技3 O</b>；弧顶金色圆＝<b>奥义 L</b>；' +
+    '弧线最左侧 4 个小圆＝<b>替身 K</b>（受击被控时按，耗 1 格气换道脱身并反击，CD ' +
+    (CFG.SUB_CD/CFG.FPS).toFixed(0) + ' 秒）/ <b>闪避 Q</b> / <b>净化 E</b> / <b>秘卷 Z</b>。' +
+    '左下只有摇杆：左右走位，上下换道。<br>' +
+    '<b>没有跳跃键，也没有独立防御键</b>：靠换道错位、闪避无敌帧、替身术来躲；' +
+    '离地全部由技能的击飞 / 扫地 / 砸地 / 跃起触发。<br><br>' +
+    '<b>键盘（电脑调试）</b><br>P1：A/D 左右，W/S 换道，J 普攻，K 替身，U/I/O 技，L 奥义，Q 闪避，E 净化，Z 秘卷，P 暂停，Esc 菜单。<br>' +
+    'P2：1 普攻 / 2 替身 / 4·5·6 技 / 3 奥义 / 7·8·9 功能键。<br><br>' +
+    '<b>规则与平衡</b><br>每格气 100，奥义耗 2 格且 CD 长；抓取无视防御并把目标拉回同道；' +
+    '强化期间自身受伤 +10%，霸体被破霸体技能命中多受 20%。秘卷、场地、机制都在菜单里换。<br><br>' +
+    '<b>联网</b><br>菜单 → 房间码联机：一人创建、另一人输同一房间码加入，两台手机各管各的角色。' +
+    '部署 Cloudflare Worker 后自动连；没部署就用「本机码 / 对方码」手动交换。<br><br>' +
+    '<b>左上角</b>「暂停 / 菜单」收起了原来挤在中间的按钮；菜单里可换角色、场地、机制、秘卷、看战绩。';
 }
 function renderStats() {
   const st = S.stats, box = $('#statsBody');
@@ -1337,6 +1728,8 @@ function startMatch() {
   S.paused = false; S.aiTick = 0; S.aiCache = { held:0, acts:[] };
   S.orb = null; S.prevD = undefined; S.netEvents = [];
   S.input.dir = 0; S.input.up = S.input.down = false;
+  S.input.lanePulse = 0; S.input.laneArmed = true;
+  S.net.remoteLane = 0; S.net.remoteDir = 0;
   S.scene = 'game';
   $('#btnPause').textContent = '暂停';
   toast(S.mode === 'online' ? '联网对局开始' : '开打！');
@@ -1383,8 +1776,10 @@ requestAnimationFrame(loop);
 
 // 调试 / 自动化验收接口
 window.__aimf = {
-  S: S, C: C, CFG: CFG, RULES: RULES,
-  act: act, doAct: doAct, step: step, startMatch: startMatch,
+  S: S, C: C, CFG: CFG, RULES: RULES, SKILL_FIRE: SKILL_FIRE,
+  act: act, doAct: doAct, doLane: doLane, laneHit: laneHit,
+  projLaneHit: projLaneHit, spec: spec, laneY: laneY,
+  step: step, startMatch: startMatch,
   snapshot: snapshot, applySnapshot: applySnapshot,
   netSend: netSend, wireDC: wireDC, netStatus: netStatus,
   togglePause: togglePause, buildChips: buildChips,
