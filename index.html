@@ -249,10 +249,20 @@ textarea{width:100%;min-height:74px;background:#0e1330;color:#dfe6ff;border:1px 
       color:#fff;letter-spacing:3px;text-transform:uppercase" placeholder="4 位房间码" maxlength="4"></div>
     <div class="kv" id="netStatus">未连接</div>
     <h2>高级：无 Worker 时手动交换</h2>
-    <div class="hint">若没部署信令服务，可把「本机码」发给对方、把「对方码」粘进来，点对点直连。</div>
-    <div class="row"><textarea id="sdpOut" placeholder="本机码（点创建/加入后生成）"></textarea></div>
-    <div class="row"><textarea id="sdpIn" placeholder="粘贴对方码"></textarea>
-      <button class="btn" id="btnSdp">应用对方码</button></div>
+    <div class="hint"><b>两个框别搞反</b>：上面「本机码」只复制发出去、不往里粘东西；
+      下面「对方码」只粘对方发来的整段 <code>{"t":"offer"...}</code> 或
+      <code>{"t":"answer"...}</code>。<b>4 位房间码不是对方码</b>，粘进去会报错。</div>
+    <!-- 只读：防止把对方码粘到上框覆盖掉本机码（手机端最常见的误操作） -->
+    <div class="row"><textarea id="sdpOut" readonly placeholder="本机码（点创建房间，或应用对方码后自动生成）"></textarea></div>
+    <div class="row">
+      <button class="btn" id="btnCopySdp">复制本机码</button>
+      <span class="kv" id="sdpLen" style="flex:0 0 auto;align-self:center">尚未生成</span>
+    </div>
+    <div class="row"><textarea id="sdpIn" placeholder="粘贴对方发来的整段码（以 { 开头、} 结尾）"></textarea></div>
+    <div class="row">
+      <button class="btn" id="btnPasteSdp">从剪贴板粘贴</button>
+      <button class="btn pri" id="btnSdp">应用对方码</button>
+    </div>
   </div></div>
 
   <!-- 战绩 -->
@@ -663,6 +673,9 @@ function tickArena() {
 // ======================== 每帧推进 ========================
 function step() {
   if (S.paused || S.over || S.scene !== 'game') return;
+  // 联机还没打通时不要空跑：否则房主等应答期间后台已经打掉半局，
+  // 客人一连上就收到一帧很旧的快照，看起来像「两边不同步」。
+  if (S.mode === 'online' && !S.net.open) return;
   S.t++;
   S.timeLeft = Math.max(0, CFG.ROUND_SEC - S.t / CFG.FPS);
 
@@ -1087,9 +1100,15 @@ function wireDC(dc) {
   };
   dc.onclose = () => { S.net.open = false; netStatus('连接断开'); toast('对手断开'); };
 }
+// 统一写「本机码」：只读框 + 字符数，一眼看出有没有复制全
+function setLocalCode(obj) {
+  const txt = JSON.stringify(obj);
+  $('#sdpOut').value = txt;
+  $('#sdpLen').textContent = '共 ' + txt.length + ' 字符';
+}
 function signalSend(o) {
   if (S.net.ws && S.net.ws.readyState === 1) S.net.ws.send(JSON.stringify(o));
-  else { S.net.buf.push(o); $('#sdpOut').value = JSON.stringify(o); }
+  else { S.net.buf.push(o); setLocalCode(o); }
 }
 function wsConnect(code, role) {
   if (!CFG.WORKER_URL) { netStatus('未配置信令 → 用下方「本机码 / 对方码」手动交换'); return; }
@@ -1106,12 +1125,13 @@ function wsConnect(code, role) {
   ws.onerror = () => netStatus('信令连不上，请检查 WORKER_URL 或用手动交换');
 }
 async function hostOffer() {
+  $('#sdpLen').textContent = '正在生成本机码（等网络候选，最多 6 秒）…';
   const pc = pcMake(); S.net.pc = pc;
   const dc = pc.createDataChannel('aimf'); wireDC(dc);
   const off = await pc.createOffer(); await pc.setLocalDescription(off); await waitIce(pc);
   const payload = { t:'offer', d: pc.localDescription, room:S.net.room, from:'host' };
-  signalSend(payload); $('#sdpOut').value = JSON.stringify(payload);
-  netStatus('已发送本机码，等对方应答');
+  signalSend(payload); setLocalCode(payload);
+  netStatus('已生成 offer：点「复制本机码」发给对方，等对方回码');
 }
 async function netApply(m) {
   let pc = S.net.pc;
@@ -1121,8 +1141,8 @@ async function netApply(m) {
     await pc.setRemoteDescription(m.d);
     const ans = await pc.createAnswer(); await pc.setLocalDescription(ans); await waitIce(pc);
     const payload = { t:'answer', d: pc.localDescription, room:S.net.room, from:'guest' };
-    signalSend(payload); $('#sdpOut').value = JSON.stringify(payload);
-    netStatus('已回应对手，正在打通…');
+    signalSend(payload); setLocalCode(payload);
+    netStatus('已生成 answer：点「复制本机码」发回给房主');
   } else {
     await pc.setRemoteDescription(m.d); netStatus('应答已应用，正在打通…');
   }
@@ -1149,21 +1169,69 @@ $('#btnJoin').addEventListener('click', () => {
   if (CFG.WORKER_URL) wsConnect(c, 'guest');
   else netStatus('未配置信令：把房主的「本机码」粘进下方框，点「应用对方码」');
 });
-$('#btnSdp').addEventListener('click', async () => {
+// 一键复制整段本机码：避免手机长按全选把 800 字符的码截半
+$('#btnCopySdp').addEventListener('click', async () => {
+  const txt = $('#sdpOut').value;
+  if (!txt) { toast('还没有本机码：先点「创建房间」或先应用对方码'); return; }
+  let ok = false;
+  try { await navigator.clipboard.writeText(txt); ok = true; } catch (e) {}
+  if (!ok) {
+    // 兜底：临时 textarea + execCommand，兼容不给剪贴板权限的国产浏览器
+    try {
+      const t = document.createElement('textarea');
+      t.value = txt; t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t); t.focus(); t.select();
+      ok = document.execCommand('copy'); document.body.removeChild(t);
+    } catch (e) {}
+  }
+  toast(ok ? '已复制整段本机码（' + txt.length + ' 字符），发给对方' : '复制失败：请长按上框全选复制');
+});
+// 从剪贴板直接粘到下框；不给权限就退回手动长按
+$('#btnPasteSdp').addEventListener('click', async () => {
   try {
-    const m = JSON.parse($('#sdpIn').value.trim());
-    if (!m.d) { toast('对方码格式不对'); return; }
-    if (!S.net.role) S.net.role = m.t === 'offer' ? 'guest' : 'host';
+    const t = await navigator.clipboard.readText();
+    if (t) { $('#sdpIn').value = t.trim(); toast('已粘贴，点「应用对方码」'); return; }
+  } catch (e) {}
+  toast('浏览器不给读剪贴板：请长按下框手动粘贴');
+});
+$('#btnSdp').addEventListener('click', async () => {
+  const raw = $('#sdpIn').value.trim();
+  if (!raw) { toast('下框是空的：先粘对方发来的整段码'); return; }
+  // 最常见的误操作：把 4 位房间码当对方码粘进来
+  if (/^[A-Za-z0-9]{4}$/.test(raw)) {
+    toast('这是房间码，不是对方码！请粘整段 {"t":"offer"...}'); return;
+  }
+  // 手机复制常被截断：缺头或缺尾直接说人话，不抛英文 JSON 报错
+  if (raw.charAt(0) !== '{' || raw.charAt(raw.length - 1) !== '}') {
+    toast('码不完整（可能被截断）：要整段，从 { 开头到 } 结尾'); return;
+  }
+  let m;
+  try { m = JSON.parse(raw); }
+  catch (e) { toast('码不是完整 JSON：请让对方用「复制本机码」重发'); return; }
+  if (m.t !== 'offer' && m.t !== 'answer') {
+    toast('这段码不是 offer / answer，粘错内容了'); return;
+  }
+  if (!m.d || !m.d.type || !m.d.sdp) {
+    toast('码里缺连接信息，可能被截断了，请重新复制整段'); return;
+  }
+  if (!S.net.role) S.net.role = m.t === 'offer' ? 'guest' : 'host';
+  try {
     await netApply(m);
-    if (m.t === 'offer') { /* netApply 已生成 answer 并写进 sdpOut */ }
-    toast('已应用对方码');
-  } catch (e) { toast('解析失败：' + e.message); }
+    $('#sdpIn').value = '';
+    toast(m.t === 'offer'
+      ? '已应用：上面生成了 answer，点「复制本机码」发回给房主'
+      : '已应用对方应答，正在打通…');
+  } catch (e) {
+    toast('连接信息应用失败：' + e.message + '，建议双方刷新重来');
+  }
 });
 function netDisconnect() {
   try { if (S.net.dc) S.net.dc.close(); } catch(e){}
   try { if (S.net.pc) S.net.pc.close(); } catch(e){}
   try { if (S.net.ws) S.net.ws.close(); } catch(e){}
   S.net = { role:'', room:'', ws:null, pc:null, dc:null, open:false, buf:[] };
+  $('#sdpOut').value = ''; $('#sdpIn').value = '';
+  $('#sdpLen').textContent = '尚未生成';
 }
 
 // ======================== 页面 / 弹层 ========================
