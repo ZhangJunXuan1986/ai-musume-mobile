@@ -220,7 +220,7 @@ textarea{width:100%;min-height:74px;background:#0e1330;color:#dfe6ff;border:1px 
   <!-- 主页面 -->
   <div class="ov" id="ovMenu"><div class="card">
     <button class="close" data-close="ovMenu">×</button>
-    <h1>AI娘大乱斗</h1><div class="sub">手机版 v3.7 · 火影式扇形按键 · 一人一屏 · 房间码可联网 1v1</div>
+    <h1>AI娘大乱斗</h1><div class="sub">手机版 v3.8 · 火影式扇形按键 · PVE 四档 AI · 一人一屏 · 房间码可联网 1v1</div>
     <div class="row"><button class="btn pri" id="btnStart">开始对战</button>
       <button class="btn" id="btnNet">房间码联机</button></div>
     <h2>模式</h2>
@@ -228,6 +228,9 @@ textarea{width:100%;min-height:74px;background:#0e1330;color:#dfe6ff;border:1px 
       <button class="chip on" data-mode="solo">单人 PVE（电脑）</button>
       <button class="chip" data-mode="online">联网 1v1</button>
     </div>
+    <h2>AI 强度 <span class="kv">（仅单人 PVE，战斗中切也立刻生效）</span></h2>
+    <div class="row" id="aiRow"></div>
+    <div class="hint" id="aiDesc"></div>
     <h2>我的角色 <span class="kv" id="charName"></span></h2>
     <div class="row" id="charRow"></div>
     <h2>场地 / 机制 / 秘卷</h2>
@@ -322,16 +325,17 @@ const CFG = {
   TOUCH_SLOP: 10,
   // 摇杆死区（0~1），太小会手抖乱走
   STICK_DEAD: 0.30,
-  // AI 每多少帧决策一次（越小越凶）
-  AI_THINK: C.AI_THINK_FRAMES,
+  // 决策间隔已移到下面 AI_LEVELS 各档的 think 字段（可按强度分别设定）
+  AI_THINK: C.AI_THINK_FRAMES,   // 兼容保留，实际不再使用
   // 房间码信令：填 Cloudflare Worker 的 https 地址即自动联机；
   // 留空则走「手动交换本机码/对方码」兜底，零后端也能联。
   WORKER_URL: '',
   ICE: [{ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }],
   // 对战快照发送间隔（host → guest，单位帧）
   SNAP_EVERY: 2,
-  // 本机战绩存档键
+  // 本机战绩存档键 / 设置存档键
   STATS_KEY: 'aimusume_h5_stats_v1',
+  PREF_KEY: 'aimusume_h5_pref_v1',
   W: 1280, H: 720,                      // 战斗世界坐标（只用于绘制）
 
   // ---------- ②-a 三条道（y 轴 / 深度）：跟火影手游一样上中下三路 ----------
@@ -360,6 +364,41 @@ const CFG = {
   SWEEP_BONUS: 1.35,                   // 扫地（打浮空目标）伤害倍率
   SLAM_BONUS: 1.25,                    // 砸地（把浮空目标砸落）伤害倍率
 };
+
+/* ============================================================================
+ * ②-d PVE 的 AI 强度档位（只对单人 PVE 生效，联网的 P2 是真人，不受影响）
+ * ----------------------------------------------------------------------------
+ * 全部只改「电脑怎么决策」，一个战斗数值都不动：不调血量、不调伤害、不调 CD。
+ * 想自己加档/改手感，复制一项改数字即可。0 = 该行为禁用。
+ *
+ *  think       每多少帧决策一次（越大越迟钝）
+ *  leash       超过这个距离就完全站定不追（散步档拉开距离它就不管你了）
+ *  engage      大于这个距离才主动靠近（越大越愿意保持距离、不贴脸）
+ *  backoff     小于这个距离会往后退（越大越不黏人）
+ *  laneChase   不同道时主动追回同道的频率分母（0=不追，只放跨道技能）
+ *  laneDodge   对面出招时错位躲的频率分母（0=不躲）
+ *  wander      周期性主动换道走位的间隔（0=不主动乱走）
+ *  skillEvery  每几次决策才允许考虑放技能（越大越「省技能」）
+ *  atkEvery    普攻节流；ultEvery/scrollEvery/dodgeEvery/subEvery 同理
+ *  cleanse     0/1，是否会在被控时自己净化
+ * ========================================================================== */
+const AI_LEVELS = [
+  // 注意：开局双方相距约 560 像素（x=0.28W / 0.72W），leash 必须大于它，
+  //       否则默认档一开局就站着不动。leash 是「拉开到这个距离就脱战站定」，
+  //       不是「保持距离」；保持距离由 engage / backoff 管。
+  { id:'stroll', name:'散步', desc:'几乎不追人：拉开距离就站定，只偶尔出招，不换道追、不放奥义/秘卷/替身，适合熟悉按键和技能',
+    think:22, leash:620, engage:330, backoff:200, laneChase:0, laneDodge:0, wander:0,
+    skillEvery:3, atkEvery:1, ultEvery:0, scrollEvery:0, dodgeEvery:0, subEvery:0, cleanse:0 },
+  { id:'normal', name:'标准', desc:'默认档：会追、会换道、会放技能，但技能有节流，被贴脸会退一步，不会一直贴着你连',
+    think:16, leash:950, engage:155, backoff:95, laneChase:2, laneDodge:4, wander:48,
+    skillEvery:2, atkEvery:1, ultEvery:10, scrollEvery:40, dodgeEvery:7, subEvery:8, cleanse:1 },
+  { id:'fierce', name:'凶狠', desc:'主动追击、频繁换道、技能连发，会躲你的招、会开秘卷和替身，接近之前的强度',
+    think:11, leash:1200, engage:130, backoff:60, laneChase:1, laneDodge:2, wander:31,
+    skillEvery:1, atkEvery:1, ultEvery:6, scrollEvery:24, dodgeEvery:4, subEvery:5, cleanse:1 },
+  { id:'savage', name:'撕咬', desc:'原版全开：贴脸追咬、见缝插针放技能、奥义一好就甩，适合想被暴打的',
+    think:8,  leash:99999, engage:100, backoff:45, laneChase:1, laneDodge:1, wander:20,
+    skillEvery:1, atkEvery:1, ultEvery:3, scrollEvery:16, dodgeEvery:2, subEvery:3, cleanse:1 },
+];
 
 /* ============================================================================
  * ②-c 火影化技能表（H5 专属叠加层，规则表 JSON 一个字不用改）
@@ -453,6 +492,7 @@ const S = {
   scene: 'menu',            // menu / game / over
   mode: CFG.DEFAULT_MODE,   // solo / online
   charIdx: 0, p2CharIdx: 1,
+  aiLevel: 1,                  // AI_LEVELS 下标，默认「标准」
   arenaIdx: 0, effect: 'none', scrollName: '霸体',
   paused: false, over: false, winner: 0, t: 0, timeLeft: CFG.ROUND_SEC,
   f: [null, null],          // [P1, P2]
@@ -477,6 +517,19 @@ function loadStats() {
   return { P1: blankSide(), P2: blankSide() };
 }
 function saveStats() { try { localStorage.setItem(CFG.STATS_KEY, JSON.stringify(S.stats)); } catch (e) {} }
+
+// ======================== 设置（AI 强度档位） ========================
+const aiLv = () => AI_LEVELS[S.aiLevel] || AI_LEVELS[1];
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(CFG.PREF_KEY));
+    if (p && Number.isInteger(p.aiLevel) && p.aiLevel >= 0 && p.aiLevel < AI_LEVELS.length)
+      S.aiLevel = p.aiLevel;
+  } catch (e) { /* 隐私模式退回默认档 */ }
+}
+function savePrefs() {
+  try { localStorage.setItem(CFG.PREF_KEY, JSON.stringify({ aiLevel: S.aiLevel })); } catch (e) {}
+}
 function recordMatch(w) {
   const st = S.stats;
   ['P1', 'P2'].forEach((k, i) => {
@@ -822,53 +875,70 @@ function doAct(f, action) {
   }
 }
 
-// ======================== 电脑 AI（与 v3.5 同思路：决策计数节流） ========================
+// ======================== 电脑 AI（决策节流 + PVE 强度档位） ========================
+// 只改「电脑怎么决策」，不改任何战斗数值。档位定义见上面 AI_LEVELS。
 function aiThink() {
   const bot = S.f[1], foe = S.f[0];
   if (!bot || !foe) return;
+  const lv = aiLv();                       // 每帧读，菜单里切档立刻生效
   S.aiTick++; const tick = S.aiTick;
   const dist = Math.abs(bot.x - foe.x);
   let held = 0; const acts = [];
-  if (dist > C.AI_ENGAGE) held = bot.x < foe.x ? 1 : -1;
-  else if (dist < 54 && tick % 8 < 2) held = bot.x < foe.x ? -1 : 1;
 
-  // --- y 轴：电脑也会换道 ---
+  // 超出牵引距离：完全站定、不出招。散步档拉开距离就能脱身，不再被全程咬住
+  const idle = dist > lv.leash;
+  if (!idle) {
+    if (dist > lv.engage) held = bot.x < foe.x ? 1 : -1;              // 靠近
+    else if (dist < lv.backoff && tick % 8 < 2) held = bot.x < foe.x ? -1 : 1;  // 贴太近就退
+  }
+
+  // --- y 轴：换道（追道 / 主动走位 / 躲招都按档位开关） ---
   let lane = 0;
   const gap = bot.lane - foe.lane;
   if (bot.z <= 0 && bot.laneCd === 0) {
-    if (gap !== 0 && tick % 4 === 0)
+    if (gap !== 0 && lv.laneChase > 0 && tick % (4 * lv.laneChase) === 0)
       lane = gap > 0 ? -1 : 1;            // 不同道 → 回同道才打得到
-    else if (gap === 0 && tick % 31 === 0)
-      lane = (Math.floor(tick / 31) % 2) ? 1 : -1;   // 周期性主动错位走位
-    else if (foe.state === 'atk' && dist < C.AI_FAR && tick % 3 === 0)
+    else if (gap === 0 && lv.wander > 0 && tick % lv.wander === 0)
+      lane = (Math.floor(tick / lv.wander) % 2) ? 1 : -1;   // 周期性主动错位
+    else if (foe.state === 'atk' && dist < C.AI_FAR && lv.laneDodge > 0 &&
+             tick % (3 * lv.laneDodge) === 0)
       lane = tick % 2 ? 1 : -1;          // 对面出招 → 错位躲
   }
   const sameLane = gap === 0;
 
-  // 被控 / 浮空时优先替身，其次净化
-  if ((bot.status.stun || bot.status.sleep || bot.z > 0) &&
-      bot.subCd === 0 && bot.rage >= CFG.SUB_RAGE && tick % 5 === 0)
+  // --- 自保（按档位节流 / 禁用） ---
+  if (lv.subEvery > 0 && (bot.status.stun || bot.status.sleep || bot.z > 0) &&
+      bot.subCd === 0 && bot.rage >= CFG.SUB_RAGE && tick % lv.subEvery === 0)
     acts.push('substitute');
-  if ((bot.status.stun || bot.status.silence || bot.status.sleep || bot.mark > 0) && bot.cleanseCd === 0)
+  if (lv.cleanse && (bot.status.stun || bot.status.silence || bot.status.sleep || bot.mark > 0) &&
+      bot.cleanseCd === 0)
     acts.push('cleanse');
-  if (dist < C.AI_ENGAGE + 40 && foe.state === 'atk' && bot.dodgeCd === 0 && tick % C.AI_DODGE_EVERY === 0)
+  if (lv.dodgeEvery > 0 && dist < C.AI_ENGAGE + 40 && foe.state === 'atk' &&
+      bot.dodgeCd === 0 && tick % lv.dodgeEvery === 0)
     acts.push('dodge');
-  const free = s => (bot.cd[s] || 0) === 0;
-  if (!sameLane) {
-    // 不同道：只放能跨道的技能，避免原地空挥
-    if (bot.rage >= C.AI_ULT_RAGE && free('ult') && tick % C.AI_ULT_EVERY === 0) acts.push('ult');
-    else if (free('s2')) acts.push('s2');
-    else if (free('s3')) acts.push('s3');
-  } else if (dist > C.AI_FAR) {
-    if (free('s2')) acts.push('s2'); else if (free('s1')) acts.push('s1'); else if (free('s3')) acts.push('s3');
-  } else if (dist > C.AI_ENGAGE) {
-    if (free('s1')) acts.push('s1'); else if (free('s3')) acts.push('s3'); else if (free('s2')) acts.push('s2');
-  } else {
-    if (bot.rage >= C.AI_ULT_RAGE && free('ult') && tick % C.AI_ULT_EVERY === 0) acts.push('ult');
-    if (free('s3')) acts.push('s3'); else if (free('s1')) acts.push('s1');
-    else if (free('s2')) acts.push('s2'); else if ((bot.cd.atk || 0) === 0) acts.push('atk');
+
+  // --- 出招：skillEvery 是总节流，0 档直接跳过 ---
+  if (!idle && tick % lv.skillEvery === 0) {
+    const free = s => (bot.cd[s] || 0) === 0;
+    const ultOk = lv.ultEvery > 0 && bot.rage >= C.AI_ULT_RAGE &&
+                  free('ult') && tick % lv.ultEvery === 0;
+    if (!sameLane) {
+      // 不同道：只放能跨道的技能，避免原地空挥
+      if (ultOk) acts.push('ult');
+      else if (free('s2')) acts.push('s2');
+      else if (free('s3')) acts.push('s3');
+    } else if (dist > C.AI_FAR) {
+      if (free('s2')) acts.push('s2'); else if (free('s1')) acts.push('s1'); else if (free('s3')) acts.push('s3');
+    } else if (dist > lv.engage) {
+      if (free('s1')) acts.push('s1'); else if (free('s3')) acts.push('s3'); else if (free('s2')) acts.push('s2');
+    } else {
+      if (ultOk) acts.push('ult');
+      if (free('s3')) acts.push('s3'); else if (free('s1')) acts.push('s1');
+      else if (free('s2')) acts.push('s2');
+      else if (lv.atkEvery > 0 && tick % lv.atkEvery === 0 && (bot.cd.atk || 0) === 0) acts.push('atk');
+    }
   }
-  if (bot.scrollCd === 0 && tick % C.AI_SCROLL_EVERY === 0) acts.push('scroll');
+  if (lv.scrollEvery > 0 && bot.scrollCd === 0 && tick % lv.scrollEvery === 0) acts.push('scroll');
   S.aiCache = { held: held, acts: acts, lane: lane || (S.aiCache.lane || 0) };
 }
 
@@ -898,6 +968,8 @@ function tickArena() {
 // ======================== 每帧推进 ========================
 function step() {
   if (S.paused || S.over || S.scene !== 'game') return;
+  // 单人 PVE 打开菜单时冻结对局：方便中途被追着打时立刻降 AI 档，不会边切边挨打
+  if (S.mode === 'solo' && !$('#ovMenu').hidden) return;
   // 联机还没打通时不要空跑：否则房主等应答期间后台已经打掉半局，
   // 客人一连上就收到一帧很旧的快照，看起来像「两边不同步」。
   if (S.mode === 'online' && !S.net.open) return;
@@ -913,7 +985,7 @@ function step() {
   if (S.mode === 'online' && S.net.open && S.net.role === 'host') d1 = S.input.dir;
   let d2 = 0;
   if (S.mode === 'solo') {
-    if (S.t % CFG.AI_THINK === 0) aiThink();
+    if (S.t % aiLv().think === 0) aiThink();
     d2 = S.aiCache.held;
     S.aiCache.acts.forEach(a => doAct(p2, a));
     S.aiCache.acts = [];
@@ -1237,7 +1309,7 @@ function updateHUD() {
     $$(pair[1] + ' i').forEach((el,j)=>el.classList.toggle('on', (pair[0].lane|0) === j));
   });
   $('#clock').textContent = Math.ceil(S.timeLeft);
-  $('#meta').textContent = (S.mode==='online'?'联网 1v1':'单人 PVE') + ' · ' +
+  $('#meta').textContent = (S.mode==='online'?'联网 1v1':'单人 PVE · AI '+aiLv().name) + ' · ' +
     (RULES.arenas[S.arenaIdx].name) + ' · ' + (RULES.arena_effects[S.effect].name) + ' · ' + S.scrollName;
   const kit = kitOf(a.cid);
   $('#skillbar').innerHTML = ['s1','s2','s3','ult'].map(s => {
@@ -1609,6 +1681,26 @@ $$('[data-close]').forEach(b => b.addEventListener('click', () => hide('#' + b.d
 $$('.ov').forEach(o => o.addEventListener('pointerdown', e => { if (e.target === o && o.id !== 'ovOver') o.hidden = true; }));
 
 function buildChips() {
+  // --- AI 强度档位（只对单人 PVE 生效）---
+  const air = $('#aiRow'); air.innerHTML = '';
+  AI_LEVELS.forEach((lv, i) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (i === S.aiLevel ? ' on' : '');
+    b.textContent = lv.name; b.title = lv.desc;
+    b.style.opacity = (S.mode === 'online' ? '.45' : '1');
+    b.addEventListener('click', () => {
+      if (S.mode === 'online') { toast('AI 强度只在单人 PVE 生效'); return; }
+      S.aiLevel = i;
+      // 立刻丢掉上一档残留的追击方向，不然还要等一次决策才停脚
+      S.aiCache = { held: 0, acts: [], lane: S.aiCache.lane || 0 };
+      savePrefs(); buildChips();
+      toast('AI 强度：' + lv.name + (S.scene === 'game' ? '（已立即生效）' : ''));
+    });
+    air.appendChild(b);
+  });
+  $('#aiDesc').innerHTML = '<b>当前：' + aiLv().name + '</b> · ' + aiLv().desc +
+    '<br>档位只改电脑的决策节奏与追击欲望，<b>不改血量 / 伤害 / 技能数值</b>；设置会记在本机浏览器里。';
+
   const cr = $('#charRow'); cr.innerHTML = '';
   RULES.characters.forEach((c, i) => {
     const b = document.createElement('button');
@@ -1642,7 +1734,7 @@ function buildChips() {
     b.addEventListener('click', () => { S.scrollName = k; buildChips(); });
     sr.appendChild(b);
   });
-  $('#menuHint').innerHTML = '当前：<b>' + (S.mode === 'online' ? '联网 1v1' : '单人 PVE') + '</b> · ' +
+  $('#menuHint').innerHTML = '当前：<b>' + (S.mode === 'online' ? '联网 1v1' : '单人 PVE · AI ' + aiLv().name) + '</b> · ' +
     RULES.arenas[S.arenaIdx].name + ' · ' + RULES.arena_effects[S.effect].name + ' · 秘卷 ' + S.scrollName +
     '<br>手机版默认只显示 P1 一套按键；P2 由电脑或远端玩家控制，不再同屏挤两套。';
 }
@@ -1694,6 +1786,11 @@ function renderHelp() {
     '离地全部由技能的击飞 / 扫地 / 砸地 / 跃起触发。<br><br>' +
     '<b>键盘（电脑调试）</b><br>P1：A/D 左右，W/S 换道，J 普攻，K 替身，U/I/O 技，L 奥义，Q 闪避，E 净化，Z 秘卷，P 暂停，Esc 菜单。<br>' +
     'P2：1 普攻 / 2 替身 / 4·5·6 技 / 3 奥义 / 7·8·9 功能键。<br><br>' +
+    '<b>AI 强度（仅单人 PVE）</b><br>主页面「AI 强度」有 4 档：' +
+    AI_LEVELS.map(l => '<b>'+l.name+'</b>（'+l.desc+'）').join('；') + '。<br>' +
+    '默认 <b>标准</b>；觉得被追着撕咬就切「散步」。档位只改电脑的追击距离、反应速度、' +
+    '换道追人频率和出招节流，<b>不改血量/伤害/技能数值</b>，所以赢了就是同规则下赢的。' +
+    '战斗中点「菜单」会暂时冻结对局，切完档关掉菜单立刻生效，选择会记在本机浏览器里。<br><br>' +
     '<b>规则与平衡</b><br>每格气 100，奥义耗 2 格且 CD 长；抓取无视防御并把目标拉回同道；' +
     '强化期间自身受伤 +10%，霸体被破霸体技能命中多受 20%。秘卷、场地、机制都在菜单里换。<br><br>' +
     '<b>联网</b><br>菜单 → 房间码联机：一人创建、另一人输同一房间码加入，两台手机各管各的角色。' +
@@ -1713,7 +1810,7 @@ function renderStats() {
 }
 function showOver(w) {
   $('#overTitle').textContent = w === 0 ? '平局' : (w === 1 ? 'P1 胜利' : 'P2 胜利');
-  $('#overSub').textContent = (S.mode === 'online' ? '联网 1v1' : '单人 PVE') + ' · ' +
+  $('#overSub').textContent = (S.mode === 'online' ? '联网 1v1' : '单人 PVE · AI ' + aiLv().name) + ' · ' +
     RULES.arenas[S.arenaIdx].name + ' · 用时 ' + Math.round(CFG.ROUND_SEC - S.timeLeft) + ' 秒';
   show('#ovOver');
 }
@@ -1768,6 +1865,7 @@ function loop(ts) {
 
 // ======================== 启动 ========================
 S.stats = loadStats();
+loadPrefs();                 // 读回上次选的 AI 强度档位
 resize();
 buildChips();
 S.f = [ makeF(1, RULES.characters[0].id, CFG.W*0.28), makeF(2, RULES.characters[1].id, CFG.W*0.72) ];
@@ -1777,6 +1875,7 @@ requestAnimationFrame(loop);
 // 调试 / 自动化验收接口
 window.__aimf = {
   S: S, C: C, CFG: CFG, RULES: RULES, SKILL_FIRE: SKILL_FIRE,
+  AI_LEVELS: AI_LEVELS, aiLv: aiLv, aiThink: aiThink,
   act: act, doAct: doAct, doLane: doLane, laneHit: laneHit,
   projLaneHit: projLaneHit, spec: spec, laneY: laneY,
   step: step, startMatch: startMatch,
