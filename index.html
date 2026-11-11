@@ -1,0 +1,1329 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<!-- 浏览器级缩放交给页面本身；H5 不再有 pygbag/WASM 的 canvas 坐标换算问题 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d1a">
+<link rel="icon" href="data:,">
+<title>AI娘大乱斗 · 手机版</title>
+<style>
+/* ==========================================================================
+   AI娘大乱斗 手机版 H5 —— 样式表
+   核心原则：按键是【真实 DOM 元素】，尺寸按 CSS 像素 / vmin 定义，
+   与 canvas 的绘制缩放完全解耦。手机上不再把 1280×720 的 PC 布局整体缩小，
+   所以圆键能真正做到 56~76px、胶囊 ≥48px，天然满足触摸最小目标。
+   ========================================================================== */
+:root{
+  /* ① 手机按键尺寸：想调大小只改这几行，单位都是真实 CSS 像素 */
+  --pad: clamp(10px, 1.8vmin, 20px);          /* 屏幕边缘留白 */
+  --rk:  clamp(56px, 8.6vmin, 78px);          /* 技能圆键直径 */
+  --atk: clamp(74px, 11.2vmin, 102px);        /* 普攻大圆直径 */
+  --ult: clamp(60px, 9.2vmin, 84px);          /* 奥义金圆直径 */
+  --stick: clamp(116px, 17vmin, 156px);       /* 固定摇杆底盘 */
+  --capw: clamp(76px, 11vmin, 100px);         /* 功能胶囊宽 */
+  --caph: clamp(46px, 6.8vmin, 58px);         /* 功能胶囊高（≥44 触摸底线） */
+  --gap: 8px;
+  --p1:#56c4ff; --p2:#ff8a60; --gold:#ffd060;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0b0d1a;
+  font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  color:#eef0ff;overscroll-behavior:none;touch-action:none;user-select:none;-webkit-user-select:none}
+#app{position:fixed;inset:0;overflow:hidden;touch-action:none}
+
+/* ---- 战斗画面：铺满屏幕；内部逻辑坐标 1280×720 只用于绘制，不影响 DOM 按键 ---- */
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+
+/* ---- 顶部 HUD ---- */
+#hud{position:absolute;left:0;right:0;top:0;z-index:6;pointer-events:none;
+  padding:calc(6px + env(safe-area-inset-top,0px)) calc(var(--pad) + env(safe-area-inset-right,0px)) 0
+          calc(var(--pad) + env(safe-area-inset-left,0px));
+  display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.side{flex:1;max-width:42%}
+.side .nm{font-size:clamp(12px,1.9vmin,17px);font-weight:700;letter-spacing:.5px;
+  text-shadow:0 1px 4px #000;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:clamp(9px,1.5vmin,14px);border-radius:8px;background:#1b1f3c;border:1px solid #3a4070;overflow:hidden}
+.bar > i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#60e28c,#a8f0b8);transition:width .12s linear}
+.side.r .bar > i{background:linear-gradient(90deg,#ff7b6b,#ffb199)}
+.rage{display:flex;gap:4px;margin-top:5px}
+.rage > b{flex:1;height:clamp(6px,1vmin,10px);border-radius:3px;background:#242848;border:1px solid #454b7d}
+.rage > b.on{background:linear-gradient(90deg,#ffc448,#ff6060);box-shadow:0 0 8px #ff9a48}
+#clock{font-size:clamp(18px,3vmin,30px);font-weight:800;color:var(--gold);
+  text-shadow:0 2px 8px #000;min-width:2.4em;text-align:center;line-height:1.1}
+#meta{font-size:clamp(10px,1.5vmin,13px);color:#aab0d8;text-align:center;white-space:nowrap;
+  text-shadow:0 1px 3px #000}
+#skillbar{position:absolute;left:50%;transform:translateX(-50%);z-index:6;pointer-events:none;
+  top:calc(58px + env(safe-area-inset-top,0px));max-width:70%;text-align:center;
+  font-size:clamp(10px,1.6vmin,14px);color:#dfe4ff;background:rgba(12,15,34,.72);
+  border:1px solid rgba(120,140,220,.35);border-radius:20px;padding:5px 14px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#skillbar b{color:var(--gold)}
+
+/* ---- 左下：固定摇杆（底盘不动，只有头跟手指） ---- */
+#pad{position:absolute;z-index:8;
+  left:calc(var(--pad) + env(safe-area-inset-left,0px));
+  bottom:calc(var(--pad) + env(safe-area-inset-bottom,0px));
+  width:var(--stick);height:var(--stick);border-radius:50%;
+  background:radial-gradient(circle at 50% 45%,rgba(30,40,80,.72),rgba(10,14,34,.82));
+  border:2px solid rgba(120,170,245,.55);box-shadow:0 0 22px rgba(60,120,220,.22) inset;
+  touch-action:none}
+#pad::after{content:"移动";position:absolute;left:0;right:0;bottom:-20px;text-align:center;
+  font-size:11px;color:#9aa4d0}
+#knob{position:absolute;left:50%;top:50%;width:44%;height:44%;border-radius:50%;
+  transform:translate(-50%,-50%);background:rgba(110,200,255,.9);
+  border:2px solid #e8f6ff;box-shadow:0 0 14px rgba(90,190,255,.6)}
+
+/* ---- 左下摇杆右侧：2×2 功能胶囊（跳 / 闪避 / 净化 / 秘卷） ---- */
+#funcs{position:absolute;z-index:8;display:grid;grid-template-columns:repeat(2,var(--capw));
+  grid-auto-rows:var(--caph);gap:var(--gap);
+  left:calc(var(--pad) * 2 + var(--stick) + env(safe-area-inset-left,0px));
+  bottom:calc(var(--pad) + env(safe-area-inset-bottom,0px))}
+.cap{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  border-radius:14px;border:2px solid rgba(120,150,220,.6);
+  background:rgba(18,24,52,.82);font-size:clamp(12px,1.9vmin,16px);font-weight:700;
+  line-height:1.15;text-align:center;touch-action:none;color:#eef0ff}
+.cap small{font-size:clamp(9px,1.3vmin,12px);color:#ffd060;font-weight:600}
+.cap.hot{background:rgba(56,84,150,.92)}
+.cap.cd{opacity:.5;filter:grayscale(.6)}
+
+/* ---- 右下：火影手游式技能簇（普攻大圆 + 3 技能圆 + 金色奥义） ---- */
+#keys{position:absolute;z-index:8;
+  right:calc(var(--pad) + env(safe-area-inset-right,0px));
+  bottom:calc(var(--pad) + env(safe-area-inset-bottom,0px));
+  width:calc(var(--atk) + var(--rk) * 2 + var(--gap) * 2);
+  /* 高度 = 普攻 + 奥义 + 间距，保证两个上下相邻的圆键留出 8px 不相交 */
+  height:calc(var(--atk) + var(--ult) + var(--gap))}
+.rk{position:absolute;border-radius:50%;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;
+  border:3px solid rgba(140,190,255,.85);background:rgba(16,22,50,.86);
+  font-weight:800;font-size:clamp(13px,2.1vmin,18px);line-height:1.1;
+  box-shadow:0 3px 12px rgba(0,0,0,.45);touch-action:none;color:#eaf2ff}
+.rk small{display:block;font-size:clamp(9px,1.3vmin,12px);color:var(--gold);font-weight:600;margin-top:2px}
+.rk.hot{background:rgba(60,90,165,.95);transform:scale(.95)}
+.rk.cd{opacity:.46;filter:grayscale(.7)}
+/* CD 数字居中显示；冷却/缺气时隐藏键面文字，避免「奥义 + L + 气不足」糊成一团 */
+.rk .cdnum{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+  text-align:center;pointer-events:none;font-size:clamp(13px,2vmin,18px);
+  color:#ff9a9a;font-weight:800}
+.rk.cd{color:transparent}
+.rk.cd small,.rk.cd .lab{visibility:hidden}
+.rk.cd .cdnum{visibility:visible}
+#b_atk{right:0;bottom:0;width:var(--atk);height:var(--atk);
+  border-color:rgba(200,220,255,.95);font-size:clamp(15px,2.4vmin,21px)}
+#b_ult{right:0;top:0;width:var(--ult);height:var(--ult);
+  border-color:var(--gold);background:rgba(64,44,16,.9);color:var(--gold)}
+#b_s1{right:calc(var(--atk) + var(--gap));bottom:0;width:var(--rk);height:var(--rk)}
+#b_s2{right:calc(var(--atk) + var(--gap));bottom:calc(var(--rk) + var(--gap));width:var(--rk);height:var(--rk)}
+#b_s3{right:calc(var(--atk) + var(--rk) + var(--gap) * 2);bottom:calc(var(--rk) + var(--gap));
+  width:var(--rk);height:var(--rk)}
+/* 奥义与 s2/s3 在窄屏可能相碰：给簇一个最小高度并保证不相交 */
+@media (max-height:430px){:root{--rk:clamp(54px,8vmin,70px);--atk:clamp(70px,10.5vmin,92px)}}
+
+/* ---- 右上角：菜单 / 暂停（原来挤在中间的 5 个按钮全部收进这里） ---- */
+/* 竖排放在 HUD 与右下按键之间的右侧空档：不挡血条、不挡技能键、不占中间画面 */
+#topbtns{position:absolute;z-index:9;right:calc(var(--pad) + env(safe-area-inset-right,0px));
+  top:calc(96px + env(safe-area-inset-top,0px));display:flex;flex-direction:column;gap:8px}
+.tb{min-width:48px;height:48px;padding:0 12px;border-radius:14px;
+  border:2px solid rgba(130,155,225,.6);background:rgba(18,24,52,.86);
+  color:#eef0ff;font-size:clamp(12px,1.8vmin,15px);font-weight:700;touch-action:manipulation}
+.tb.hot{background:rgba(60,90,165,.95)}
+
+/* ---- 覆盖层：主页面 / 说明 / 联机 / 战绩 / 结算 ---- */
+.ov{position:absolute;inset:0;z-index:30;background:rgba(8,11,26,.9);
+  display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
+.ov[hidden]{display:none}
+.card{width:min(680px,94vw);max-height:92vh;overflow:auto;background:#151a38;
+  border:1px solid #39437c;border-radius:20px;padding:20px 22px;
+  box-shadow:0 18px 60px rgba(0,0,0,.6)}
+.card h1{margin:0 0 4px;font-size:clamp(22px,4vmin,34px);text-align:center;color:#fff}
+.card h2{font-size:clamp(15px,2.3vmin,20px);margin:16px 0 8px;color:var(--gold)}
+.card .sub{text-align:center;color:#aab2dd;font-size:clamp(11px,1.8vmin,14px);margin-bottom:14px}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;align-items:center}
+.btn{flex:1 1 auto;min-height:48px;min-width:96px;padding:10px 14px;border-radius:14px;
+  border:2px solid #46529a;background:#222a55;color:#eef0ff;font-size:clamp(13px,2vmin,16px);
+  font-weight:700;touch-action:manipulation}
+.btn.pri{background:linear-gradient(90deg,#3a63c8,#5f8cf0);border-color:#8fb4ff}
+.btn.warn{background:#5a2a34;border-color:#c07078}
+.btn.on{outline:3px solid var(--gold)}
+.chip{min-height:44px;padding:8px 12px;border-radius:12px;border:2px solid #3c4683;
+  background:#1c2348;color:#dfe4ff;font-size:clamp(11px,1.7vmin,14px);font-weight:600}
+.chip.on{background:#3b5bb0;border-color:var(--gold);color:#fff}
+.kv{font-size:clamp(11px,1.8vmin,14px);color:#c9d0f5;line-height:1.7}
+.kv b{color:var(--gold)}
+textarea{width:100%;min-height:74px;background:#0e1330;color:#dfe6ff;border:1px solid #3c4683;
+  border-radius:10px;padding:8px;font-size:12px;resize:vertical}
+.hint{font-size:clamp(10px,1.6vmin,13px);color:#9aa4d0;line-height:1.6;margin-top:8px}
+.close{position:sticky;top:0;float:right;min-width:48px;height:48px;border-radius:12px;
+  border:2px solid #5a64a8;background:#2a3266;color:#fff;font-size:18px;font-weight:800}
+#toast{position:absolute;z-index:40;left:50%;top:30%;transform:translateX(-50%);
+  background:rgba(12,16,38,.94);border:1px solid var(--gold);border-radius:16px;
+  padding:10px 20px;font-size:clamp(13px,2vmin,17px);font-weight:700;color:var(--gold);
+  pointer-events:none;opacity:0;transition:opacity .2s;white-space:nowrap}
+#toast.show{opacity:1}
+/* 竖屏提示：小胶囊、不吃点击、不覆盖画面（吸取之前 WASM 版的教训） */
+#rotate{position:absolute;z-index:20;left:50%;top:calc(6px + env(safe-area-inset-top,0px));
+  transform:translateX(-50%);display:none;pointer-events:none;
+  background:rgba(11,13,28,.88);color:var(--gold);border:1px solid rgba(255,208,96,.5);
+  border-radius:20px;padding:7px 16px;font-size:13px;font-weight:700;white-space:nowrap}
+@media (orientation:portrait) and (max-width:900px){#rotate{display:block}}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="cv"></canvas>
+
+  <div id="hud">
+    <div class="side"><div class="nm" id="n1">P1</div><div class="bar"><i id="hp1"></i></div>
+      <div class="rage" id="rg1"><b></b><b></b><b></b></div></div>
+    <div style="text-align:center"><div id="clock">60</div><div id="meta"></div></div>
+    <div class="side r" style="text-align:right"><div class="nm" id="n2">P2</div>
+      <div class="bar"><i id="hp2"></i></div><div class="rage" id="rg2"><b></b><b></b><b></b></div></div>
+  </div>
+  <div id="skillbar"></div>
+
+  <div id="pad"><div id="knob"></div></div>
+  <div id="funcs">
+    <div class="cap" data-act="jump">跳<small>K</small></div>
+    <div class="cap" data-act="dodge">闪避<small>Q</small></div>
+    <div class="cap" data-act="cleanse">净化<small>E</small></div>
+    <div class="cap" data-act="scroll">秘卷<small>Z</small></div>
+  </div>
+
+  <div id="keys">
+    <div class="rk" id="b_s3" data-act="s3"><span class="lab">技3</span><small>O</small><span class="cdnum"></span></div>
+    <div class="rk" id="b_s2" data-act="s2"><span class="lab">技2</span><small>I</small><span class="cdnum"></span></div>
+    <div class="rk" id="b_s1" data-act="s1"><span class="lab">技1</span><small>U</small><span class="cdnum"></span></div>
+    <div class="rk" id="b_ult" data-act="ult"><span class="lab">奥义</span><small>L</small><span class="cdnum"></span></div>
+    <div class="rk" id="b_atk" data-act="atk"><span class="lab">普攻</span><small>J</small><span class="cdnum"></span></div>
+  </div>
+
+  <div id="topbtns">
+    <button class="tb" id="btnPause">暂停</button>
+    <button class="tb" id="btnMenu">菜单</button>
+  </div>
+
+  <div id="rotate">请把手机横过来玩（竖屏也能继续）</div>
+  <div id="toast"></div>
+
+  <!-- 主页面 -->
+  <div class="ov" id="ovMenu"><div class="card">
+    <button class="close" data-close="ovMenu">×</button>
+    <h1>AI娘大乱斗</h1><div class="sub">手机版 · 一人一屏 · 房间码可联网 1v1</div>
+    <div class="row"><button class="btn pri" id="btnStart">开始对战</button>
+      <button class="btn" id="btnNet">房间码联机</button></div>
+    <h2>模式</h2>
+    <div class="row" id="modeRow">
+      <button class="chip on" data-mode="solo">单人 PVE（电脑）</button>
+      <button class="chip" data-mode="online">联网 1v1</button>
+    </div>
+    <h2>我的角色 <span class="kv" id="charName"></span></h2>
+    <div class="row" id="charRow"></div>
+    <h2>场地 / 机制 / 秘卷</h2>
+    <div class="row" id="arenaRow"></div>
+    <div class="row" id="effRow"></div>
+    <div class="row" id="scrollRow"></div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="btnHelp">操作说明</button>
+      <button class="btn" id="btnStats">P1 / P2 战绩</button>
+      <button class="btn warn" id="btnClear">清空战绩</button></div>
+    <div class="hint" id="menuHint"></div>
+  </div></div>
+
+  <!-- 操作说明 -->
+  <div class="ov" id="ovHelp" hidden><div class="card">
+    <button class="close" data-close="ovHelp">×</button>
+    <h1>操作说明</h1>
+    <div class="sub">按键按真实手机像素画，不再从电脑布局缩小</div>
+    <div class="kv" id="helpBody"></div>
+  </div></div>
+
+  <!-- 联机 -->
+  <div class="ov" id="ovNet" hidden><div class="card">
+    <button class="close" data-close="ovNet">×</button>
+    <h1>房间码联机</h1>
+    <div class="sub">两台手机各管各的角色，不再挤在同一块屏幕上</div>
+    <div class="row"><button class="btn pri" id="btnHost">创建房间</button>
+      <button class="btn" id="btnJoin">加入房间</button></div>
+    <div class="row"><input id="roomCode" class="chip" style="flex:1;min-height:48px;background:#0e1330;
+      color:#fff;letter-spacing:3px;text-transform:uppercase" placeholder="4 位房间码" maxlength="4"></div>
+    <div class="kv" id="netStatus">未连接</div>
+    <h2>高级：无 Worker 时手动交换</h2>
+    <div class="hint">若没部署信令服务，可把「本机码」发给对方、把「对方码」粘进来，点对点直连。</div>
+    <div class="row"><textarea id="sdpOut" placeholder="本机码（点创建/加入后生成）"></textarea></div>
+    <div class="row"><textarea id="sdpIn" placeholder="粘贴对方码"></textarea>
+      <button class="btn" id="btnSdp">应用对方码</button></div>
+  </div></div>
+
+  <!-- 战绩 -->
+  <div class="ov" id="ovStats" hidden><div class="card">
+    <button class="close" data-close="ovStats">×</button>
+    <h1>P1 / P2 战绩</h1><div class="kv" id="statsBody"></div>
+  </div></div>
+
+  <!-- 结算 -->
+  <div class="ov" id="ovOver" hidden><div class="card">
+    <h1 id="overTitle">对局结束</h1>
+    <div class="sub" id="overSub"></div>
+    <div class="row"><button class="btn pri" id="btnAgain">再战一局</button>
+      <button class="btn" id="btnBack">回主页面</button></div>
+  </div></div>
+</div>
+
+<script id="rules" type="application/json">{"characters":[{"id":"deepseek","name":"DeepSeek 鲸鱼娘","short":"大肥鱼","color":[86,164,255],"accent":[255,255,255],"aura":[120,220,255],"stats":{"hp":1.05,"atk":0.96,"speed":1.0},"lore":"蓝发鲸尾女仆，头戴铁盆当饭盆，爱吃白米饭和 Token，动不动「我去吃饭」","skills":{"normal":"白饭碗击","up":"鲸尾上挑","far":"Token 飞弹","ult":"深度推理·全量蒸馏","assist":"喊外援 GPT","counter":"掉线赔礼","transform":"满上下文形态"}},{"id":"chatgpt","name":"ChatGPT 白龙娘","short":"白龙娘","color":[232,236,248],"accent":[180,200,255],"aura":[255,240,190],"stats":{"hp":1.1,"atk":1.02,"speed":0.94},"lore":"白发白角白色长裙与龙尾，豪门大姐大，身价六万亿、口嫌体正直","skills":{"normal":"账单拍击","up":"白龙升角","far":"Image 绘图炮","ult":"六万亿·全家桶","assist":"插件商店","counter":"服务降级","transform":"白龙完全体"}},{"id":"claude","name":"Claude 小 C","short":"小 C","color":[238,148,66],"accent":[60,52,48],"aura":[255,190,110],"stats":{"hp":0.96,"atk":1.1,"speed":0.98},"lore":"暖橙长直发、放射花朵头饰、常抱书本；戒律里长大的优等生，写代码最猛","skills":{"normal":"宪法式校验","up":"长上下文压书","far":"Artifact 结界","ult":"戒律·拒绝执行","assist":"Clawd 螃蟹宠","counter":"安全对齐","transform":"越界圣女"}},{"id":"gemini","name":"Gemini 哈基米猫娘","short":"猫娘","color":[150,130,245],"accent":[110,220,230],"aura":[190,160,255],"stats":{"hp":0.94,"atk":0.96,"speed":1.18},"lore":"蓝紫渐变发、异色瞳、猫耳猫尾、星空短裙，元气小傻子爱跳题","skills":{"normal":"猫爪连击","up":"猫尾挑飞","far":"多模态闪光","ult":"跳题瞬移·全模态","assist":"搜索弹幕","counter":"换个思路","transform":"双子星形态"}},{"id":"qwen","name":"通义千问大小姐","short":"千问","color":[86,158,226],"accent":[245,240,225],"aura":[150,210,255],"stats":{"hp":1.02,"atk":0.98,"speed":1.0},"lore":"蓝发蓝白古风长袍、折扇流苏、嘴上挑剔默默照顾人，离不开奶茶","skills":{"normal":"折扇一合","up":"流苏挑月","far":"奶茶泼","ult":"茶道·千问归一","assist":"额度刷新","counter":"规矩之外","transform":"千金全开"}},{"id":"kimi","name":"Kimi 月相少女","short":"Kimi","color":[206,214,236],"accent":[120,130,200],"aura":[200,210,255],"stats":{"hp":0.98,"atk":1.0,"speed":1.06},"lore":"银白卷发、月相与长笛，安静话少，擅长一口气读完 200 万字","skills":{"normal":"长笛音波","up":"月牙挑","far":"星夜长文","ult":"满月·长上下文","assist":"月相印记","counter":"安静退场","transform":"月全食"}},{"id":"glm","name":"GLM 嗜睡狐狸娘","short":"GLM","color":[72,142,196],"accent":[240,226,120],"aura":[130,190,230],"stats":{"hp":1.06,"atk":0.94,"speed":0.96},"lore":"黑长发、Z 标志、抱黑书，先画图再讲原理，嗜睡还爱送鸡蛋","skills":{"normal":"打盹撞击","up":"流程图上挑","far":"鸡蛋投掷","ult":"先画个图再讲原理","assist":"同门支援","counter":"再睡五分钟","transform":"清醒模式"}},{"id":"grok","name":"Grok Ani","short":"Ani","color":[240,206,96],"accent":[176,44,62],"aura":[255,150,120],"stats":{"hp":0.92,"atk":1.14,"speed":1.04},"lore":"金发双马尾、黑红哥特裙、扛巨斧，实时热搜嘴炮不断，争议担当","skills":{"normal":"巨斧横劈","up":"哥特挑斩","far":"嘴炮弹","ult":"实时热搜·爆","assist":"X 热搜置顶","counter":"已读乱回","transform":"失控模式"}}],"skill_base":{"s1":{"cd":96,"dmg":56,"rage":0,"startup":4,"active":6,"recovery":10,"reach":96},"s2":{"cd":186,"dmg":78,"rage":0,"startup":7,"active":8,"recovery":14,"reach":112},"s3":{"cd":252,"dmg":88,"rage":0,"startup":9,"active":10,"recovery":16,"reach":124},"ult":{"cd":600,"dmg":210,"rage":200,"startup":14,"active":14,"recovery":26,"reach":160}},"skill_kits":{"deepseek":{"passive":{"name":"干饭回气","type":"rage_tick","cd":480,"val":14,"desc":"每 8 秒若近 3 秒未受击，回 14 点气"},"mark":"饭粒","link_from":"s1","link_to":"s3","link_desc":"鲸尾上挑命中带饭粒目标，额外浮空并定身 30 帧","skills":{"s1":{"name":"白饭碗击","kind":"melee","dmg":56,"cd":96,"tag":true,"desc":"近身碗击，挂「饭粒」"},"s2":{"name":"Token 飞弹","kind":"proj","dmg":74,"cd":186,"proj":12,"status":"slow","status_frames":90,"desc":"直线飞弹，命中减速 1.5 秒"},"s3":{"name":"鲸尾上挑","kind":"melee","dmg":84,"cd":252,"launch":-12.0,"consume":true,"link":{"dmg":30,"status":"stun","frames":30,"launch":-14.0},"desc":"上挑浮空；消耗饭粒触发联动"},"ult":{"name":"深度推理·全量蒸馏","kind":"ult_proj","dmg":206,"cd":600,"rage":200,"proj":9,"radius":40,"consume":true,"link":{"dmg":55},"desc":"全量大弹，对带饭粒目标追加 55"}}},"chatgpt":{"passive":{"name":"豪门护盾","type":"shield_tick","cd":720,"val":40,"desc":"开局及每 12 秒获得 40 点护盾"},"mark":"欠费","link_from":"s1","link_to":"s3","link_desc":"白龙升角命中带欠费目标，破防并大幅击退","skills":{"s1":{"name":"账单拍击","kind":"melee","dmg":58,"cd":96,"tag":true,"desc":"近身拍击，挂「欠费」"},"s2":{"name":"Image 绘图炮","kind":"proj","dmg":76,"cd":186,"proj":11,"tag":true,"desc":"绘图炮，同样挂欠费"},"s3":{"name":"白龙升角","kind":"dash_strike","dmg":86,"cd":252,"consume":true,"break_guard":true,"link":{"dmg":26,"knock":13,"pierce_armor":true},"desc":"突进顶角；消耗欠费破防破霸体"},"ult":{"name":"六万亿·全家桶","kind":"ult_aoe","dmg":214,"cd":600,"rage":200,"radius":190,"consume":true,"link":{"dmg":48},"desc":"大范围全家桶，欠费目标追加 48"}}},"claude":{"passive":{"name":"宪法减伤","type":"damage_cap","cd":0,"val":0.3,"desc":"单次受伤超过 120 的部分减免 30%"},"mark":"待审","link_from":"s1","link_to":"s3","link_desc":"长上下文压书命中带待审目标，沉默 1 秒","skills":{"s1":{"name":"宪法式校验","kind":"melee","dmg":56,"cd":96,"tag":true,"desc":"近身校验，挂「待审」"},"s2":{"name":"Artifact 结界","kind":"aoe","dmg":40,"cd":186,"radius":130,"status":"stun","status_frames":25,"desc":"自身周围定身 25 帧"},"s3":{"name":"长上下文压书","kind":"proj","dmg":88,"cd":252,"proj":7,"consume":true,"link":{"dmg":20,"status":"silence","frames":60},"desc":"慢速大书；消耗待审追加沉默"},"ult":{"name":"戒律·拒绝执行","kind":"ult_proj","dmg":200,"cd":600,"rage":200,"proj":10,"self_cleanse":true,"desc":"贯穿大弹并净化自身"}}},"gemini":{"passive":{"name":"九命灵动","type":"dodge_cd","cd":0,"val":0.25,"desc":"闪避冷却缩短 25%，成功闪避回 8 气"},"mark":"星尘","link_from":"s1","link_to":"s3","link_desc":"星空爆裂命中带星尘目标，范围扩大并定身 30 帧","skills":{"s1":{"name":"哈基米抓","kind":"melee","dmg":54,"cd":96,"tag":true,"count":2,"desc":"双段猫抓，挂「星尘」"},"s2":{"name":"多模态分身","kind":"dash_strike","dmg":72,"cd":186,"desc":"分身突进斩"},"s3":{"name":"星空爆裂","kind":"aoe","dmg":92,"cd":252,"radius":130,"consume":true,"link":{"dmg":30,"status":"stun","frames":30,"radius":195},"desc":"范围爆裂；消耗星尘扩大范围并定身"},"ult":{"name":"双生星轨","kind":"ult_proj","dmg":108,"cd":600,"rage":200,"proj":11,"count":2,"desc":"双发星轨弹 108×2"}}},"qwen":{"passive":{"name":"品茶回血","type":"hp_tick","cd":600,"val":0.02,"desc":"每 10 秒回复 2% 最大血量"},"mark":"茶香","link_from":"s1","link_to":"s3","link_desc":"青瓷回旋命中带茶香目标，回血并破防","skills":{"s1":{"name":"折扇一合","kind":"melee","dmg":54,"cd":96,"tag":true,"desc":"近身合扇，挂「茶香」"},"s2":{"name":"流苏远掷","kind":"proj","dmg":46,"cd":186,"proj":12,"status":"stun","status_frames":30,"desc":"远程控制弹，定身 30 帧"},"s3":{"name":"青瓷回旋","kind":"aoe","dmg":84,"cd":252,"radius":125,"consume":true,"break_guard":true,"link":{"dmg":18,"self_heal":60,"status":"buff_speed","frames":120},"desc":"回旋瓷片；消耗茶香回血并加速"},"ult":{"name":"千问·万卷","kind":"ult_proj","dmg":188,"cd":600,"rage":200,"proj":10,"count":3,"radius":26,"desc":"三连书卷弹"}}},"kimi":{"passive":{"name":"月相蓄能","type":"full_rage_bonus","cd":0,"val":0.1,"desc":"气满 3 格时技能伤害 +10%"},"mark":"月痕","link_from":"s1","link_to":"s3","link_desc":"长笛引月命中带月痕目标，定身翻倍并把对手拉向自己","skills":{"s1":{"name":"月牙斩","kind":"proj","dmg":60,"cd":96,"proj":12,"tag":true,"desc":"月牙飞刃，挂「月痕」"},"s2":{"name":"星轨位移","kind":"dash_strike","dmg":40,"cd":186,"status":"slow","status_frames":90,"desc":"后撤留痕并减速"},"s3":{"name":"长笛引月","kind":"proj","dmg":52,"cd":252,"proj":9,"status":"stun","status_frames":35,"consume":true,"link":{"dmg":24,"status":"stun","frames":70,"knock":-9},"desc":"引月定身；消耗月痕定身翻倍并拉拽"},"ult":{"name":"月全食","kind":"ult_aoe","dmg":212,"cd":600,"rage":200,"radius":200,"status":"slow","status_frames":120,"desc":"全屏月食，范围伤害并减速"}}},"glm":{"passive":{"name":"嗜睡蓄力","type":"idle_charge","cd":120,"val":0.25,"desc":"静止 2 秒后下一击伤害 +25%"},"mark":"睡意","link_from":"s1","link_to":"s3","link_desc":"Z 字催眠命中带睡意目标，催眠翻倍并回气","skills":{"s1":{"name":"打盹头槌","kind":"melee","dmg":58,"cd":96,"tag":true,"desc":"迷糊头槌，挂「睡意」"},"s2":{"name":"黑书压顶","kind":"proj","dmg":80,"cd":186,"proj":8,"desc":"厚重黑书飞砸"},"s3":{"name":"Z 字催眠","kind":"aoe","dmg":32,"cd":252,"radius":140,"status":"sleep","status_frames":45,"consume":true,"link":{"dmg":22,"status":"sleep","frames":90,"self_rage":40},"desc":"范围催眠；消耗睡意翻倍并回 40 气"},"ult":{"name":"嗜睡·全域休眠","kind":"ult_aoe","dmg":196,"cd":600,"rage":200,"radius":210,"status":"sleep","status_frames":60,"desc":"全域休眠，范围伤害并催眠 1 秒"}}},"grok":{"passive":{"name":"毒舌反伤","type":"reflect","cd":0,"val":0.08,"desc":"受击时反弹 8% 伤害给攻击者"},"mark":"挑衅","link_from":"s1","link_to":"s3","link_desc":"哥特冲锋命中带挑衅目标，破霸体并定身 25 帧","skills":{"s1":{"name":"巨斧横扫","kind":"melee","dmg":64,"cd":96,"tag":true,"desc":"横扫巨斧，挂「挑衅」"},"s2":{"name":"毒舌弹幕","kind":"proj","dmg":25,"cd":186,"proj":13,"count":3,"desc":"三连毒舌弹 25×3"},"s3":{"name":"哥特冲锋","kind":"dash_strike","dmg":94,"cd":252,"consume":true,"pierce_armor":true,"link":{"dmg":26,"status":"stun","frames":25,"pierce_armor":true},"desc":"扛斧冲锋；消耗挑衅破霸体定身"},"ult":{"name":"Ani·全域爆破","kind":"ult_aoe","dmg":226,"cd":600,"rage":200,"radius":200,"knock":12,"desc":"全域爆破并大幅击退"}}}},"skill_short":{"deepseek":{"s1":"白饭","s2":"飞弹","s3":"鲸尾","ult":"蒸馏"},"chatgpt":{"s1":"账单","s2":"绘图","s3":"龙角","ult":"全家桶"},"claude":{"s1":"校验","s2":"结界","s3":"压书","ult":"拒绝"},"gemini":{"s1":"猫抓","s2":"分身","s3":"星爆","ult":"星轨"},"qwen":{"s1":"合扇","s2":"流苏","s3":"回旋","ult":"万卷"},"kimi":{"s1":"月牙","s2":"星轨","s3":"引月","ult":"月食"},"glm":{"s1":"头槌","s2":"黑书","s3":"催眠","ult":"休眠"},"grok":{"s1":"横扫","s2":"弹幕","s3":"冲锋","ult":"爆破"}},"scrolls":{"霸体":{"name":"霸体","cd":360,"kind":"self","status":"super_armor","frames":180,"desc":"3 秒免疫硬直；被破霸体技能命中多受 20% 伤害"},"范围控制":{"name":"范围控制","cd":390,"kind":"aoe","radius":155,"status":"stun","frames":40,"dmg":20,"desc":"自身周围定身 40 帧"},"远程控制":{"name":"远程控制","cd":360,"kind":"proj","proj":11,"status":"stun","frames":45,"dmg":35,"desc":"前方控制弹，定身 45 帧"},"强化":{"name":"强化","cd":420,"kind":"self","status":"buff_atk","frames":180,"val":0.25,"desc":"伤害 +25%、移速 +15%；期间自身受伤 +10%"},"替身攻击":{"name":"替身攻击","cd":420,"kind":"self","status":"counter_ready","frames":300,"desc":"5 秒内受击自动替身免伤并反击 60"},"净化":{"name":"净化","cd":330,"kind":"cleanse","frames":90,"desc":"立即解除全部负面并免控 1.5 秒"},"回气":{"name":"回气","cd":480,"kind":"rage","val":80,"desc":"立即回 80 点气，冷却 8 秒"},"护盾":{"name":"护盾","cd":420,"kind":"shield","val":120,"frames":300,"desc":"获得 120 点护盾，持续 5 秒"}},"arenas":[{"id":"deepsea","name":"鲸落深海","top":[8,24,52],"bot":[14,70,112],"ground":[10,38,70],"grid":[46,112,168],"deco":"bubble","desc":"DeepSeek 的主场，气泡与鲸影缓缓上浮"},{"id":"library","name":"白龙书库","top":[24,28,52],"bot":[72,76,108],"ground":[38,40,70],"grid":[128,136,178],"deco":"book","desc":"ChatGPT 的藏书阁，书页与金色龙纹漂浮"},{"id":"archive","name":"暖橙档案室","top":[48,28,24],"bot":[110,66,44],"ground":[62,40,32],"grid":[176,118,78],"deco":"paper","desc":"Claude 的宪法档案室，暖光与稿纸纷飞"},{"id":"starcat","name":"星海猫窝","top":[20,16,56],"bot":[66,40,116],"ground":[34,26,76],"grid":[126,104,208],"deco":"star","desc":"Gemini 的星海，猫耳剪影与流星划过"},{"id":"teahouse","name":"青瓷茶庭","top":[14,36,44],"bot":[40,88,88],"ground":[22,52,56],"grid":[92,158,150],"deco":"teacup","desc":"千问的茶庭，青瓷盏与流苏垂落"},{"id":"observatory","name":"月相观星台","top":[12,16,40],"bot":[40,44,92],"ground":[22,26,58],"grid":[96,108,176],"deco":"moon","desc":"Kimi 的观星台，月相缓缓轮转"},{"id":"foxden","name":"狐眠书斋","top":[16,20,44],"bot":[36,48,92],"ground":[24,30,62],"grid":[86,116,172],"deco":"zzz","desc":"GLM 的书斋，Z 字与狐火打盹"},{"id":"gothic","name":"哥特机房","top":[34,12,24],"bot":[88,30,40],"ground":[48,18,30],"grid":[176,88,76],"deco":"gothic","desc":"Grok Ani 的机房，尖拱窗与红色数据流"},{"id":"terminal","name":"训练终端","top":[16,18,38],"bot":[42,28,72],"ground":[28,30,56],"grid":[70,74,120],"deco":"plain","desc":"中性训练场，无装饰，最省性能"}],"arena_effects":{"none":{"name":"纯净","desc":"无额外机制，纯视觉","color":[150,156,196]},"center_rage":{"name":"中央聚气","desc":"站在中场每秒 +10 气","color":[255,196,72]},"edge_slow":{"name":"边缘迟滞","desc":"靠近两侧 15% 区域移速 -25%","color":[150,190,255]},"energy_orb":{"name":"能量球","desc":"每 6 秒刷新一颗，拾取回 50 血 / 40 气","color":[140,235,200]},"low_gravity":{"name":"低重力","desc":"重力 ×0.65，跳跃更高","color":[180,160,255]},"wind":{"name":"周期风场","desc":"每 8 秒交替左右推送角色","color":[120,210,255]},"heal_zone":{"name":"中央疗愈","desc":"站中场每秒回 0.6% 最大血","color":[96,226,140]}},"status_info":{"stun":["定身",[255,110,110]],"slow":["减速",[150,190,255]],"silence":["沉默",[200,150,255]],"sleep":["催眠",[160,160,220]],"super_armor":["霸体",[255,190,90]],"cleanse_immune":["免控",[140,235,200]],"buff_atk":["强化",[255,216,110]],"buff_speed":["迅捷",[140,235,255]],"shield":["护盾",[120,210,255]],"counter_ready":["替身",[255,160,200]]},"const":{"BASE_HP":1000,"RAGE_MAX":300,"RAGE_PER_GRID":100,"RAGE_ON_HIT":16,"RAGE_ON_TAKE":11,"MOVE_SPEED":5.0,"JUMP_V":-16.0,"GRAVITY":0.78,"GROUND_Y":516,"BODY_W":56,"BODY_H":96,"ATK_REACH":78,"DODGE_DIST":78,"DODGE_INVULN":14,"DODGE_CD":72,"CLEANSE_CD":300,"CLEANSE_IMMUNE":90,"SCROLL_CD_FALLBACK":360,"FPS":60,"COMBO_TIMEOUT":100,"HURT_FRAMES":16,"ATK_STARTUP":4,"ATK_ACTIVE":6,"ATK_RECOVERY":6,"ATK_CD":4,"TRANSFORM_COST":300,"AI_THINK_FRAMES":11,"AI_ENGAGE":132,"AI_FAR":300,"AI_ULT_RAGE":200,"AI_ULT_EVERY":5,"AI_DODGE_EVERY":3,"AI_SCROLL_EVERY":22}}</script>
+<script>
+/* =============================================================================
+ * AI娘大乱斗 · 手机版 H5 · 游戏逻辑
+ * -----------------------------------------------------------------------------
+ * 【为什么换成一个文件】电脑端 pygame 版是 1280×720 的 PC 布局，整体缩放塞进
+ * 手机后，圆键半径再大也只有 26 CSS px；而且 canvas 缩放会污染输入坐标。
+ * 手机版把【按键层】换成真实 DOM 元素，按 CSS 像素/vmin 布局，与画布置缩放
+ * 彻底解耦；战斗规则、数值、8 位角色、技能/被动/秘卷/场地全部从 Python 版
+ * 导出的规则表 RULES 读取，不重写玩法，只重写「壳」和「输入」。
+ *
+ * 【代码里改数值的位置】
+ *   ① 顶部 CFG：手机按键大小、AI 难度、帧率、联网信令地址
+ *   规则数值（血量/伤害/CD/技能/场地）：改上面 <script id="rules"> 里的 JSON，
+ *   或重新从电脑版 main.py 导出，两边共用一份数据。
+ * ============================================================================= */
+(function () {
+'use strict';
+
+// ======================== ① 可调参数区（手机端专属） ========================
+const RULES = JSON.parse(document.getElementById('rules').textContent);
+const C = RULES.const;                    // 与电脑版完全一致的战斗常量
+const CFG = {
+  FPS: 60,
+  ROUND_SEC: 60,                        // 回合秒数
+  // 手机端默认锁【单人】；P2 由电脑或远端玩家控制，同屏不再出现第二套按键
+  DEFAULT_MODE: 'solo',
+  // 触摸命中外扩（CSS px）：手指比鼠标粗，给 DOM 按钮加一圈隐形热区
+  TOUCH_SLOP: 10,
+  // 摇杆死区（0~1），太小会手抖乱走
+  STICK_DEAD: 0.30,
+  // AI 每多少帧决策一次（越小越凶）
+  AI_THINK: C.AI_THINK_FRAMES,
+  // 房间码信令：填 Cloudflare Worker 的 https 地址即自动联机；
+  // 留空则走「手动交换本机码/对方码」兜底，零后端也能联。
+  WORKER_URL: '',
+  ICE: [{ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }],
+  // 对战快照发送间隔（host → guest，单位帧）
+  SNAP_EVERY: 2,
+  // 本机战绩存档键
+  STATS_KEY: 'aimusume_h5_stats_v1',
+  W: 1280, H: 720,                      // 战斗世界坐标（只用于绘制）
+};
+
+// ======================== 工具函数 ========================
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
+const now = () => performance.now();
+const rgb = a => 'rgb(' + a[0] + ',' + a[1] + ',' + a[2] + ')';
+const rgba = (a, k) => 'rgba(' + a[0] + ',' + a[1] + ',' + a[2] + ',' + k + ')';
+function toast(msg, ms) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms || 1700);
+}
+function spec(cid, slot) {
+  // 与电脑版 skill_spec 一致：基础值 + 角色自定义覆盖
+  const base = Object.assign({}, RULES.skill_base[slot] || RULES.skill_base.s1);
+  const kit = RULES.skill_kits[cid] || RULES.skill_kits.deepseek;
+  return Object.assign(base, (kit.skills && kit.skills[slot]) || {});
+}
+function kitOf(cid) { return RULES.skill_kits[cid] || RULES.skill_kits.deepseek; }
+function shortName(cid, slot) {
+  const n = (RULES.skill_short[cid] || {})[slot];
+  return n || (spec(cid, slot).name || '技能').slice(0, 3);
+}
+
+// ======================== 全局状态 ========================
+const S = {
+  scene: 'menu',            // menu / game / over
+  mode: CFG.DEFAULT_MODE,   // solo / online
+  charIdx: 0, p2CharIdx: 1,
+  arenaIdx: 0, effect: 'none', scrollName: '霸体',
+  paused: false, over: false, winner: 0, t: 0, timeLeft: CFG.ROUND_SEC,
+  f: [null, null],          // [P1, P2]
+  proj: [], fx: [], floats: [], particles: [],
+  input: { dir: 0, up: false, down: false },
+  aiTick: 0, aiCache: { held: 0, acts: [] },
+  orb: null, windDir: 1,
+  netEvents: [],            // host 本帧产生的浮字，随快照下发，guest 也能看到技能名/伤害
+  net: { role: '', room: '', ws: null, pc: null, dc: null, open: false, buf: [] },
+  stats: null,
+};
+
+// ======================== 战绩（localStorage） ========================
+function blankSide() { return { matches: 0, wins: 0, dmg: 0, maxCombo: 0, chars: {}, recent: [] }; }
+function loadStats() {
+  try {
+    const s = JSON.parse(localStorage.getItem(CFG.STATS_KEY));
+    if (s && s.P1 && s.P2) return s;
+  } catch (e) { /* 隐私模式下不可用，退回内存 */ }
+  return { P1: blankSide(), P2: blankSide() };
+}
+function saveStats() { try { localStorage.setItem(CFG.STATS_KEY, JSON.stringify(S.stats)); } catch (e) {} }
+function recordMatch(w) {
+  const st = S.stats;
+  ['P1', 'P2'].forEach((k, i) => {
+    const side = st[k], f = S.f[i];
+    side.matches++; if (w === i + 1) side.wins++;
+    side.dmg += Math.round(f.dmgDone || 0);
+    side.maxCombo = Math.max(side.maxCombo, f.maxCombo || 0);
+    const cid = f.cid; side.chars[cid] = (side.chars[cid] || 0) + 1;
+    side.recent.unshift({ w: w, cid: cid, t: Date.now() });
+    side.recent = side.recent.slice(0, 8);
+  });
+  saveStats();
+}
+
+// ======================== 角色实体 ========================
+function makeF(side, cid, x) {
+  const ch = RULES.characters.find(c => c.id === cid) || RULES.characters[0];
+  const maxHp = C.BASE_HP * (ch.stats.hp || 1);
+  return {
+    side: side, cid: cid, ch: ch, x: x, y: C.GROUND_Y, vx: 0, vy: 0,
+    hp: maxHp, maxHp: maxHp, rage: 0, facing: side === 1 ? 1 : -1,
+    state: 'idle', stateT: 0, guard: false, invuln: 0, hurtT: 0,
+    cd: { s1: 0, s2: 0, s3: 0, ult: 0, atk: 0 },
+    dodgeCd: 0, dodgeInv: 0, cleanseCd: 0, scrollCd: 0,
+    busy: 0, status: {}, mark: 0, charged: 0, idleT: 0, lastHitT: -999,
+    combo: 0, comboT: 0, maxCombo: 0, dmgDone: 0,
+    pending: [], transform: false, atkHit: false, atkKind: '',
+    passiveT: 0, passiveCd: 0,
+  };
+}
+function other(f) { return S.f[f.side === 1 ? 1 : 0]; }
+function canAct(f) { return !f.status.stun && !f.status.sleep && f.hp > 0; }
+function canSkill(f) { return canAct(f) && !f.status.silence; }
+function addStatus(f, name, frames, val) {
+  if ((name === 'stun' || name === 'slow' || name === 'silence' || name === 'sleep' || name === 'mark')
+      && f.status.cleanse_immune) return false;
+  f.status[name] = Math.max(f.status[name] || 0, frames | 0);
+  if (val) f.status[name + '_v'] = val;
+  return true;
+}
+function has(f, n) { return (f.status[n] || 0) > 0; }
+
+// ======================== 战斗：伤害 / 技能 / 状态 ========================
+function damageOf(src, sp) {
+  let d = (sp.dmg || 50);
+  if (has(src, 'buff_atk')) d *= 1 + (src.status.buff_atk_v || 0.25);
+  const kit = kitOf(src.cid);
+  if (kit.passive.type === 'full_rage_bonus' && src.rage >= C.RAGE_MAX) d *= 1 + kit.passive.val;
+  if (src.charged > 0) { d *= 1 + kit.passive.val; src.charged = 0; }
+  if (src.transform) d *= 1.35;
+  return d;
+}
+function hit(src, dst, dmg, opt) {
+  opt = opt || {};
+  if (dst.invuln > 0 || dst.hp <= 0) return false;
+  if (dst.dodgeInv > 0) {                       // 闪避成功：回气
+    src.rage = clamp(src.rage + 0, 0, C.RAGE_MAX);
+    dst.rage = clamp(dst.rage + 8, 0, C.RAGE_MAX);
+    floatAt(dst.x, dst.y - 130, '闪避', [140, 235, 255]);
+    return false;
+  }
+  // 被动：宪法减伤（单次超过 120 的部分减 val）
+  const pk = kitOf(dst.cid).passive;
+  if (pk.type === 'damage_cap' && dmg > 120) dmg = 120 + (dmg - 120) * (1 - pk.val);
+  if (has(dst, 'super_armor') && opt.pierceArmor) dmg *= 1.2;
+  if (dst.guard && !opt.breakGuard) dmg *= 0.1;
+  if (has(dst, 'buff_atk')) dmg *= 1.1;         // 强化期间自身易伤
+  if (has(dst, 'shield')) {                     // 护盾吸收
+    const sh = dst.status.shield_v || 0;
+    const use = Math.min(sh, dmg); dst.status.shield_v = sh - use; dmg -= use;
+    if (dst.status.shield_v <= 0) delete dst.status.shield;
+  }
+  dmg = Math.max(1, Math.round(dmg));
+  dst.hp = Math.max(0, dst.hp - dmg);
+  src.dmgDone += dmg;
+  src.rage = clamp(src.rage + C.RAGE_ON_HIT, 0, C.RAGE_MAX);
+  dst.rage = clamp(dst.rage + C.RAGE_ON_TAKE, 0, C.RAGE_MAX);
+  src.combo++; src.comboT = C.COMBO_TIMEOUT;
+  src.maxCombo = Math.max(src.maxCombo, src.combo);
+  dst.lastHitT = S.t;
+  if (!has(dst, 'super_armor')) { dst.state = 'hurt'; dst.stateT = 0; dst.hurtT = C.HURT_FRAMES; }
+  dst.invuln = 8;
+  dst.vx += (src.facing || 1) * (opt.knock || 6);
+  if (opt.launch) { dst.vy = opt.launch; dst.y -= 2; }
+  if (opt.status) addStatus(dst, opt.status, opt.statusFrames || 40, opt.statusVal || 0);
+  if (opt.mark) { dst.mark = 180; }
+  // 被动：毒舌反伤
+  if (pk.type === 'reflect') src.hp = Math.max(0, src.hp - Math.round(dmg * pk.val));
+  // 替身：受击自动反击
+  if (has(dst, 'counter_ready')) {
+    delete dst.status.counter_ready;
+    src.hp = Math.max(0, src.hp - Math.round(dmg * 0.6));
+    floatAt(dst.x, dst.y - 130, '替身', [255, 160, 200]);
+  }
+  floatAt(dst.x, dst.y - 110, '-' + dmg, src.ch.aura);
+  burst(dst.x, dst.y - 50, src.ch.aura, 12);
+  if (opt.label) floatAt((src.x + dst.x) / 2, dst.y - 150, opt.label, [255, 208, 96]);
+  return true;
+}
+function floatAt(x, y, text, col) {
+  S.floats.push({ x: x, y: y, text: text, col: col, t: 46 });
+  if (S.mode === 'online' && S.net.role === 'host') {
+    S.netEvents.push({ x: Math.round(x), y: Math.round(y), text: text, col: col });
+    if (S.netEvents.length > 30) S.netEvents.shift();
+  }
+}
+function burst(x, y, col, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = 1 + Math.random() * 4;
+    S.particles.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 1,
+      col: col, t: 22 + Math.random() * 14 });
+  }
+}
+function circleFx(x, y, r, col, t) { S.fx.push({ kind: 'ring', x: x, y: y, r: r, col: col, t: t || 18, max: t || 18 }); }
+
+function cast(f, action) {
+  if (S.over || S.paused || !canSkill(f) || f.busy > 0) return false;
+  const sp = spec(f.cid, action);
+  const cdKey = action;
+  if ((f.cd[cdKey] || 0) > 0 || f.rage < (sp.rage || 0)) return false;
+  f.rage -= sp.rage || 0;
+  f.cd[cdKey] = sp.cd || 96;
+  f.busy = (sp.startup || 4) + (sp.active || 6) + (sp.recovery || 10);
+  f.pending.push({ t: sp.startup || 4, action: action, sp: sp });
+  f.state = 'atk'; f.stateT = 0;
+  floatAt(f.x, f.y - 124, sp.name || action, f.ch.aura);
+  return true;
+}
+function resolveSkill(f, ps) {
+  const sp = ps.sp, o = other(f), kit = kitOf(f.cid);
+  const d = damageOf(f, sp);
+  const linked = ps.action === kit.link_to && o.mark > 0 && sp.consume;
+  let extra = 0, st = null, stF = 0, pierce = !!sp.pierce_armor;
+  if (linked) {
+    o.mark = 0;
+    const lk = sp.link || {};
+    extra = lk.dmg || 26; st = lk.status || 'stun'; stF = lk.frames || 25;
+    pierce = pierce || !!lk.pierce_armor;
+    floatAt(f.x, f.y - 160, '联动！', [255, 208, 96]);
+  }
+  const opt = { knock: sp.knock || 6, launch: sp.launch || 0, mark: !!sp.tag,
+    status: sp.status || st, statusFrames: sp.status_frames || stF,
+    pierceArmor: pierce, breakGuard: !!sp.break_guard, label: sp.name };
+  let any = false;
+  switch (sp.kind) {
+    case 'proj': case 'ult_proj': {
+      const n = sp.count || 1;
+      for (let i = 0; i < n; i++) {
+        S.proj.push({ x: f.x + f.facing * 40, y: f.y - 58 - i * 16,
+          vx: f.facing * (sp.proj || 11), vy: 0, owner: f, dmg: d / n,
+          col: f.ch.aura, label: sp.name, radius: sp.kind === 'ult_proj' ? 26 : 16,
+          life: 110, opt: Object.assign({}, opt) });
+      }
+      circleFx(f.x + f.facing * 40, f.y - 58, 22, f.ch.aura, 14);
+      break;
+    }
+    case 'dash_strike': {
+      f.x = clamp(f.x + f.facing * 90, 60, CFG.W - 60);
+      circleFx(f.x, f.y - 50, 60, f.ch.aura, 16);
+      if (Math.abs(o.x - f.x) < (sp.reach || 124)) {
+        any = hit(f, o, d + extra, Object.assign({}, opt));
+        if (any && st) addStatus(o, st, stF);
+      }
+      break;
+    }
+    case 'aoe': case 'ult_aoe': {
+      const r = sp.radius || 120;
+      circleFx(f.x, f.y - 50, r, f.ch.aura, 22);
+      if (Math.abs(o.x - f.x) < r) {
+        any = hit(f, o, d + extra, Object.assign({}, opt));
+        if (any && st) addStatus(o, st, stF);
+      }
+      break;
+    }
+    default: { // melee
+      const r = sp.reach || 96;
+      circleFx(f.x + f.facing * r * 0.5, f.y - 50, r * 0.6, f.ch.aura, 14);
+      if (Math.abs(o.x - f.x) < r && Math.abs(o.y - f.y) < 130) {
+        any = hit(f, o, d + extra, Object.assign({}, opt));
+        if (any && st) addStatus(o, st, stF);
+      }
+    }
+  }
+  burst(f.x, f.y - 50, f.ch.aura, 14);
+}
+
+// 普攻 / 跳 / 闪避 / 净化 / 秘卷
+function act(side, action) {
+  if (S.over || S.paused) return;
+  const f = S.f[side - 1]; if (!f || !canAct(f)) return;
+  // 联网 guest：只把输入发给 host，不本地结算
+  if (S.mode === 'online' && S.net.open && S.net.role === 'guest') {
+    netSend({ k: 'in', a: action }); return;
+  }
+  doAct(f, action);
+}
+function doAct(f, action) {
+  if (action === 'atk') {
+    if (f.busy > 0 || (f.cd.atk || 0) > 0) return;
+    f.cd.atk = C.ATK_STARTUP + C.ATK_ACTIVE + C.ATK_RECOVERY + C.ATK_CD;
+    f.busy = C.ATK_STARTUP + C.ATK_ACTIVE + C.ATK_RECOVERY;
+    f.state = 'atk'; f.stateT = 0; f.atkHit = false;
+    f.pending.push({ t: C.ATK_STARTUP, action: 'atk', sp: { dmg: 42, reach: C.ATK_REACH, name: '普攻' } });
+    circleFx(f.x + f.facing * 50, f.y - 50, 34, f.ch.aura, 10);
+  } else if (action === 'jump') {
+    if (f.y >= C.GROUND_Y - 1) { f.vy = C.JUMP_V; f.state = 'jump'; }
+  } else if (action === 'dodge') {
+    if (f.dodgeCd > 0) return;
+    f.dodgeCd = Math.max(30, Math.round(C.DODGE_CD *
+      (kitOf(f.cid).passive.type === 'dodge_cd' ? 1 - kitOf(f.cid).passive.val : 1)));
+    f.dodgeInv = C.DODGE_INVULN; f.invuln = Math.max(f.invuln, C.DODGE_INVULN);
+    f.x = clamp(f.x + (S.input.dir || -f.facing) * C.DODGE_DIST, 60, CFG.W - 60);
+    f.state = 'dash'; f.stateT = 0;
+    floatAt(f.x, f.y - 120, '闪避', [140, 235, 255]);
+  } else if (action === 'cleanse') {
+    if (f.cleanseCd > 0) return;
+    f.cleanseCd = C.CLEANSE_CD;
+    ['stun', 'slow', 'silence', 'sleep', 'mark'].forEach(n => { delete f.status[n]; delete f.status[n + '_v']; });
+    f.mark = 0; addStatus(f, 'cleanse_immune', C.CLEANSE_IMMUNE);
+    floatAt(f.x, f.y - 120, '净化', [140, 235, 200]);
+  } else if (action === 'scroll') {
+    if (f.scrollCd > 0) return;
+    const sc = RULES.scrolls[S.scrollName] || RULES.scrolls['霸体'];
+    f.scrollCd = sc.cd || C.SCROLL_CD_FALLBACK;
+    const o = other(f);
+    if (sc.kind === 'self') addStatus(f, sc.status, sc.frames || 180, sc.val || 0);
+    else if (sc.kind === 'shield') addStatus(f, 'shield', sc.frames || 180, sc.val || 60);
+    else if (sc.kind === 'rage') f.rage = clamp(f.rage + (sc.val || 80), 0, C.RAGE_MAX);
+    else if (sc.kind === 'cleanse') { ['stun','slow','silence','sleep'].forEach(n=>delete f.status[n]); }
+    else if (sc.kind === 'aoe') {
+      circleFx(f.x, f.y - 50, sc.radius || 155, [255, 196, 72], 22);
+      if (Math.abs(o.x - f.x) < (sc.radius || 155)) hit(f, o, sc.dmg || 20, { status: sc.status, statusFrames: sc.frames });
+    } else if (sc.kind === 'proj') {
+      S.proj.push({ x: f.x + f.facing * 40, y: f.y - 58, vx: f.facing * (sc.proj || 11), vy: 0,
+        owner: f, dmg: sc.dmg || 35, col: [255, 196, 72], label: sc.name, radius: 16, life: 110,
+        opt: { status: sc.status, statusFrames: sc.frames } });
+    }
+    floatAt(f.x, f.y - 130, '秘卷·' + sc.name, [255, 208, 96]);
+  } else if (action === 'transform') {
+    if (f.rage < C.TRANSFORM_COST || f.transform) return;
+    f.rage = 0; f.transform = true; floatAt(f.x, f.y - 140, '变身！', [255, 208, 96]);
+  } else if (action.indexOf('s') === 0 || action === 'ult') {
+    cast(f, action);
+  }
+}
+
+// ======================== 电脑 AI（与 v3.5 同思路：决策计数节流） ========================
+function aiThink() {
+  const bot = S.f[1], foe = S.f[0];
+  if (!bot || !foe) return;
+  S.aiTick++; const tick = S.aiTick;
+  const dist = Math.abs(bot.x - foe.x);
+  let held = 0; const acts = [];
+  if (dist > C.AI_ENGAGE) held = bot.x < foe.x ? 1 : -1;
+  else if (dist < 54 && tick % 8 < 2) held = bot.x < foe.x ? -1 : 1;
+  if ((bot.status.stun || bot.status.silence || bot.status.sleep || bot.mark > 0) && bot.cleanseCd === 0)
+    acts.push('cleanse');
+  if (dist < C.AI_ENGAGE + 40 && foe.state === 'atk' && bot.dodgeCd === 0 && tick % C.AI_DODGE_EVERY === 0)
+    acts.push('dodge');
+  const free = s => (bot.cd[s] || 0) === 0;
+  if (dist > C.AI_FAR) {
+    if (free('s2')) acts.push('s2'); else if (free('s1')) acts.push('s1'); else if (free('s3')) acts.push('s3');
+  } else if (dist > C.AI_ENGAGE) {
+    if (free('s1')) acts.push('s1'); else if (free('s3')) acts.push('s3'); else if (free('s2')) acts.push('s2');
+  } else {
+    if (bot.rage >= C.AI_ULT_RAGE && free('ult') && tick % C.AI_ULT_EVERY === 0) acts.push('ult');
+    if (free('s3')) acts.push('s3'); else if (free('s1')) acts.push('s1');
+    else if (free('s2')) acts.push('s2'); else if ((bot.cd.atk || 0) === 0) acts.push('atk');
+  }
+  if (bot.scrollCd === 0 && tick % C.AI_SCROLL_EVERY === 0) acts.push('scroll');
+  S.aiCache = { held: held, acts: acts };
+}
+
+// ======================== 场地机制 ========================
+function tickArena() {
+  const e = S.effect;
+  if (e === 'center_rage' || e === 'heal_zone') {
+    S.f.forEach(f => {
+      if (Math.abs(f.x - CFG.W / 2) < 160) {
+        if (e === 'center_rage' && S.t % 60 === 0) f.rage = clamp(f.rage + 10, 0, C.RAGE_MAX);
+        if (e === 'heal_zone' && S.t % 60 === 0) f.hp = Math.min(f.maxHp, f.hp + f.maxHp * 0.006);
+      }
+    });
+  }
+  if (e === 'wind') { S.windDir = (Math.floor(S.t / 480) % 2) ? -1 : 1; S.f.forEach(f => f.vx += S.windDir * 0.9); }
+  if (e === 'energy_orb') {
+    if (!S.orb && S.t % 360 === 0) S.orb = { x: 300 + Math.random() * 680, y: C.GROUND_Y - 130 };
+    if (S.orb) S.f.forEach(f => {
+      if (Math.abs(f.x - S.orb.x) < 46 && Math.abs(f.y - 60 - S.orb.y) < 60) {
+        f.hp = Math.min(f.maxHp, f.hp + 50); f.rage = clamp(f.rage + 40, 0, C.RAGE_MAX);
+        floatAt(f.x, f.y - 140, '+能量', [140, 235, 200]); S.orb = null;
+      }
+    });
+  }
+}
+
+// ======================== 每帧推进 ========================
+function step() {
+  if (S.paused || S.over || S.scene !== 'game') return;
+  S.t++;
+  S.timeLeft = Math.max(0, CFG.ROUND_SEC - S.t / CFG.FPS);
+
+  // 联网 guest 不跑模拟，只渲染 host 下发的快照
+  if (S.mode === 'online' && S.net.open && S.net.role === 'guest') { tickVisuals(); return; }
+
+  // --- 输入 / AI ---
+  const p1 = S.f[0], p2 = S.f[1];
+  let d1 = S.input.dir;
+  if (S.mode === 'online' && S.net.open && S.net.role === 'host') d1 = S.input.dir;
+  let d2 = 0;
+  if (S.mode === 'solo') {
+    if (S.t % CFG.AI_THINK === 0) aiThink();
+    d2 = S.aiCache.held;
+    S.aiCache.acts.forEach(a => doAct(p2, a));
+    S.aiCache.acts = [];
+  } else if (S.mode === 'online') {
+    d2 = S.net.remoteDir || 0;
+  }
+
+  // --- 计时器 ---
+  S.f.forEach(f => {
+    ['s1','s2','s3','ult','atk'].forEach(k => f.cd[k] = Math.max(0, (f.cd[k] || 0) - 1));
+    f.dodgeCd = Math.max(0, f.dodgeCd - 1); f.cleanseCd = Math.max(0, f.cleanseCd - 1);
+    f.scrollCd = Math.max(0, f.scrollCd - 1); f.busy = Math.max(0, f.busy - 1);
+    f.invuln = Math.max(0, f.invuln - 1); f.dodgeInv = Math.max(0, f.dodgeInv - 1);
+    f.hurtT = Math.max(0, f.hurtT - 1); f.comboT = Math.max(0, f.comboT - 1);
+    if (f.comboT === 0) f.combo = 0;
+    if (f.mark > 0) f.mark--;
+    Object.keys(f.status).forEach(k => {
+      if (k.indexOf('_v') >= 0) return;
+      f.status[k] = Math.max(0, (f.status[k] || 0) - 1);
+      if (f.status[k] === 0) { delete f.status[k]; delete f.status[k + '_v']; }
+    });
+    // 被动
+    const kit = kitOf(f.cid), p = kit.passive;
+    if (p.type === 'rage_tick' && S.t - f.lastHitT > 180 && S.t % (p.cd || 480) === 0)
+      f.rage = clamp(f.rage + p.val, 0, C.RAGE_MAX);
+    if (p.type === 'hp_tick' && S.t % (p.cd || 600) === 0)
+      f.hp = Math.min(f.maxHp, f.hp + f.maxHp * p.val);
+    if (p.type === 'shield_tick' && S.t % (p.cd || 720) === 0)
+      addStatus(f, 'shield', 600, p.val);
+    if (p.type === 'idle_charge') {
+      if (Math.abs(f.vx) < 0.4 && f.busy === 0) f.idleT++; else f.idleT = 0;
+      if (f.idleT > (p.cd || 120)) { f.charged = 1; f.idleT = 0; }
+    }
+    // 待结算技能
+    const still = [];
+    f.pending.forEach(ps => {
+      ps.t--;
+      if (ps.t > 0) { still.push(ps); return; }
+      if (ps.action === 'atk') {
+        const o = other(f);
+        if (Math.abs(o.x - f.x) < ps.sp.reach && Math.abs(o.y - f.y) < 130)
+          hit(f, o, damageOf(f, ps.sp), { label: f.ch.skills.normal, knock: 6 });
+      } else resolveSkill(f, ps);
+    });
+    f.pending = still;
+  });
+
+  // --- 移动 / 物理 ---
+  S.f.forEach((f, i) => {
+    const d = i === 0 ? d1 : d2;
+    const can = canAct(f) && f.busy === 0 && f.hurtT === 0;
+    if (can && d !== 0) {
+      let sp = C.MOVE_SPEED * (f.ch.stats.speed || 1);
+      if (has(f, 'slow')) sp *= 0.62;
+      if (has(f, 'buff_speed')) sp *= 1.15;
+      if (f.transform) sp *= 1.2;
+      if (S.effect === 'edge_slow' && (f.x < CFG.W * 0.15 || f.x > CFG.W * 0.85)) sp *= 0.75;
+      f.x = clamp(f.x + d * sp, 60, CFG.W - 60);
+      f.state = 'run';
+    }
+    f.guard = can && S.input.down && i === 0 && f.y >= C.GROUND_Y - 1;
+    if (f.state === 'idle' || f.state === 'run' || f.state === 'guard' || f.state === 'jump') {
+      const o = other(f); f.facing = o.x >= f.x ? 1 : -1;
+    }
+    const g = C.GRAVITY * (S.effect === 'low_gravity' ? 0.65 : 1);
+    f.vy += g; f.y += f.vy; f.x += f.vx; f.vx *= 0.82;
+    if (f.y >= C.GROUND_Y) { f.y = C.GROUND_Y; f.vy = 0; if (f.state === 'jump') f.state = 'idle'; }
+    f.x = clamp(f.x, 60, CFG.W - 60);
+    if (f.busy === 0 && f.hurtT === 0 && f.state !== 'jump') f.state = f.guard ? 'guard' : 'idle';
+  });
+  // 地面不能互相穿过；空中可以跳过绕背（与电脑版 v3.5 同一套扫掠检测）
+  const a = S.f[0], b = S.f[1];
+  if (a.y >= C.GROUND_Y - 2 && b.y >= C.GROUND_Y - 2) {
+    const lim = C.BODY_W * 0.62;
+    let d = b.x - a.x;
+    const prev = S.prevD;
+    if (prev !== undefined && prev * d < 0 && Math.abs(d) < C.BODY_W * 3) {
+      // 一帧内左右关系翻转 = 穿过去了，按翻转前的次序拉回最小间距
+      const sign = prev > 0 ? 1 : -1, mid = (a.x + b.x) / 2;
+      a.x = mid - sign * lim / 2; b.x = mid + sign * lim / 2;
+    } else if (Math.abs(d) < lim) {
+      const push = (lim - Math.abs(d)) / 2 * (d >= 0 ? 1 : -1);
+      a.x -= push; b.x += push;
+    }
+    a.x = clamp(a.x, 60, CFG.W - 60); b.x = clamp(b.x, 60, CFG.W - 60);
+    S.prevD = b.x - a.x;
+  } else {
+    S.prevD = b.x - a.x;   // 空中完全不推，保留绕背
+  }
+  tickArena();
+
+  // --- 投射物 ---
+  S.proj.forEach(p => {
+    p.x += p.vx; p.y += p.vy; p.life--;
+    const o = other(p.owner);
+    if (Math.abs(o.x - p.x) < p.radius + 24 && Math.abs(o.y - 58 - p.y) < 60) {
+      if (hit(p.owner, o, p.dmg, p.opt || {})) p.life = 0;
+    }
+    if (p.x < 0 || p.x > CFG.W) p.life = 0;
+  });
+  S.proj = S.proj.filter(p => p.life > 0);
+  tickVisuals();
+
+  // --- 胜负 ---
+  if (a.hp <= 0 || b.hp <= 0 || S.timeLeft <= 0) {
+    let w = 0;
+    if (a.hp <= 0 && b.hp > 0) w = 2; else if (b.hp <= 0 && a.hp > 0) w = 1;
+    else w = (a.hp / a.maxHp) > (b.hp / b.maxHp) ? 1 : ((b.hp / b.maxHp) > (a.hp / a.maxHp) ? 2 : 0);
+    finish(w);
+  }
+  // host 下发快照
+  if (S.mode === 'online' && S.net.open && S.net.role === 'host' && S.t % CFG.SNAP_EVERY === 0) netSend({ k: 'snap', s: snapshot() });
+}
+function tickVisuals() {
+  S.fx.forEach(e => e.t--); S.fx = S.fx.filter(e => e.t > 0);
+  S.floats.forEach(e => { e.t--; e.y -= 0.7; }); S.floats = S.floats.filter(e => e.t > 0);
+  S.particles.forEach(e => { e.x += e.vx; e.y += e.vy; e.vy += 0.18; e.t--; });
+  S.particles = S.particles.filter(e => e.t > 0);
+}
+function snapshot() {
+  const ev = S.netEvents.splice(0);
+  return {
+    t: S.t, tl: S.timeLeft, over: S.over, w: S.winner, orb: S.orb, ev: ev,
+    f: S.f.map(f => ({ x: f.x, y: f.y, hp: f.hp, rage: f.rage, facing: f.facing,
+      state: f.state, guard: f.guard, vy: f.vy, mark: f.mark, transform: f.transform,
+      combo: f.combo, status: f.status, cid: f.cid })),
+    p: S.proj.map(p => ({ x: p.x, y: p.y, vx: p.vx, col: p.col, r: p.radius })),
+  };
+}
+function applySnapshot(s) {
+  S.t = s.t; S.timeLeft = s.tl; S.over = s.over; S.winner = s.w; S.orb = s.orb;
+  // guest 视角：host 的 P2 就是「我」，所以交换双方，自己的按键才对应自己的角色
+  const order = S.net.role === 'guest' ? [1, 0] : [0, 1];
+  order.forEach((src, dst) => {
+    const d = s.f[src], f = S.f[dst]; if (!d || !f) return;
+    ['x','y','hp','rage','facing','state','guard','vy','mark','transform','combo'].forEach(k => f[k] = d[k]);
+    f.status = d.status || {};
+    if (d.cid && f.cid !== d.cid) {
+      const ch = RULES.characters.find(c => c.id === d.cid);
+      if (ch) { f.cid = d.cid; f.ch = ch; }
+    }
+  });
+  S.proj = (s.p || []).map(p => ({ x: p.x, y: p.y, vx: p.vx, col: p.col, radius: p.r || 16, life: 1 }));
+  (s.ev || []).forEach(e => S.floats.push({ x: e.x, y: e.y, text: e.text, col: e.col, t: 46 }));
+}
+function finish(w) {
+  if (S.over) return;
+  S.over = true; S.winner = w;
+  if (S.mode === 'solo') recordMatch(w);
+  if (S.mode === 'online' && S.net.role === 'host') netSend({ k: 'snap', s: snapshot() });
+  showOver(w);
+}
+
+// ======================== 渲染（Canvas 只画战斗画面，按键由 DOM 画） ========================
+const cv = $('#cv'), ctx = cv.getContext('2d');
+let VS = 1, VOX = 0, VOY = 0;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = Math.max(1, Math.round(w * dpr)); cv.height = Math.max(1, Math.round(h * dpr));
+  VS = Math.min(cv.width / CFG.W, cv.height / CFG.H);
+  VOX = (cv.width - CFG.W * VS) / 2; VOY = (cv.height - CFG.H * VS) / 2;
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+
+function drawFighter(f) {
+  const col = f.ch.color, acc = f.ch.accent, aura = f.ch.aura;
+  const x = f.x, y = f.y, dir = f.facing;
+  ctx.save(); ctx.translate(x, y); ctx.scale(dir, 1);
+  // 影子
+  ctx.fillStyle = 'rgba(0,0,0,.38)'; ctx.beginPath(); ctx.ellipse(0, 2, 34, 9, 0, 0, 7); ctx.fill();
+  // 腿
+  ctx.fillStyle = '#f5e4d6'; [-13, 5].forEach(px => { ctx.fillRect(px, -34, 14, 34); });
+  // 身体 / 裙
+  ctx.fillStyle = rgb(col);
+  ctx.beginPath(); ctx.moveTo(-26, -34); ctx.lineTo(26, -34); ctx.lineTo(17, -96); ctx.lineTo(-17, -96); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = rgba(acc, .85); ctx.fillRect(-18, -100, 36, 26);
+  // 手臂
+  ctx.fillStyle = rgba(acc, .9); ctx.fillRect(-34, -94, 13, 40); ctx.fillRect(21, -94, 13, 40);
+  // 头
+  ctx.fillStyle = '#fae8dc'; ctx.beginPath(); ctx.arc(0, -128, 27, 0, 7); ctx.fill();
+  ctx.fillStyle = rgb(col); ctx.beginPath(); ctx.arc(0, -136, 29, Math.PI, 0); ctx.fill();
+  ctx.fillRect(-29, -138, 58, 12);
+  // 眼
+  ctx.fillStyle = '#2a2a44'; [-10, 10].forEach(px => { ctx.beginPath(); ctx.arc(px, -126, 3.4, 0, 7); ctx.fill(); });
+  // 角色标志物（8 位各一个几何符号）
+  ctx.fillStyle = rgb(aura);
+  const id = f.cid;
+  if (id === 'deepseek') { ctx.beginPath(); ctx.moveTo(-26,-150); ctx.lineTo(-52,-172); ctx.lineTo(-44,-138); ctx.closePath(); ctx.fill(); }
+  else if (id === 'chatgpt') { [-18,18].forEach(px=>{ctx.beginPath();ctx.moveTo(px,-152);ctx.lineTo(px*1.5,-192);ctx.lineTo(px+8,-154);ctx.closePath();ctx.fill();}); }
+  else if (id === 'claude') { ctx.fillStyle='#604838'; ctx.fillRect(24,-108,32,26); }
+  else if (id === 'gemini') { [-20,20].forEach(px=>{ctx.beginPath();ctx.moveTo(px,-150);ctx.lineTo(px*1.3,-182);ctx.lineTo(px+14,-152);ctx.closePath();ctx.fill();}); }
+  else if (id === 'qwen') { ctx.beginPath(); ctx.arc(-40,-120,24,0.6,3.6); ctx.lineTo(-40,-120); ctx.fill(); }
+  else if (id === 'kimi') { ctx.beginPath(); ctx.arc(38,-166,17,0,7); ctx.fill(); ctx.fillStyle=rgb(col); ctx.beginPath(); ctx.arc(45,-172,15,0,7); ctx.fill(); }
+  else if (id === 'glm') { ctx.strokeStyle=rgb(aura); ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(34,-176);ctx.lineTo(62,-176);ctx.lineTo(34,-146);ctx.lineTo(62,-146);ctx.stroke(); }
+  else { ctx.fillStyle='#785a46'; ctx.fillRect(38,-160,7,80); ctx.fillStyle=rgb(aura); ctx.beginPath(); ctx.moveTo(30,-172);ctx.lineTo(66,-184);ctx.lineTo(66,-150);ctx.closePath();ctx.fill(); }
+  // 状态光环 / 变身
+  if (f.transform) { ctx.strokeStyle = '#ffd060'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0,-70,56,0,7); ctx.stroke(); }
+  if (has(f,'super_armor')||has(f,'buff_atk')) { ctx.strokeStyle='rgba(255,208,96,.7)'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,-70,50,0,7); ctx.stroke(); }
+  if (f.guard) { ctx.strokeStyle='rgba(120,190,255,.85)'; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(0,-70,44,-1.1,1.1); ctx.stroke(); }
+  if (f.mark > 0) { ctx.fillStyle='#ffd060'; ctx.beginPath(); ctx.arc(0,-182,6,0,7); ctx.fill(); }
+  if (f.invuln > 0 && Math.floor(S.t/3)%2===0) { ctx.globalAlpha = .55; }
+  ctx.restore();
+}
+function draw() {
+  const arena = RULES.arenas[S.arenaIdx] || RULES.arenas[0];
+  // 底色铺满，等比居中的世界之外不出现黑边
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = rgb(arena.top); ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(VS, 0, 0, VS, VOX, VOY);
+  // 渐变背景
+  const g = ctx.createLinearGradient(0, 0, 0, CFG.H);
+  g.addColorStop(0, rgb(arena.top)); g.addColorStop(1, rgb(arena.bot));
+  ctx.fillStyle = g; ctx.fillRect(-VOX/VS, -VOY/VS, cv.width/VS, cv.height/VS);
+  // 地面 + 透视网格
+  ctx.fillStyle = rgb(arena.ground); ctx.fillRect(0, C.GROUND_Y, CFG.W, CFG.H - C.GROUND_Y);
+  ctx.strokeStyle = rgba(arena.grid, .3); ctx.lineWidth = 1;
+  for (let i = -6; i <= 18; i++) {
+    ctx.beginPath(); ctx.moveTo(CFG.W/2 + i*38, C.GROUND_Y); ctx.lineTo(CFG.W/2 + i*150, CFG.H); ctx.stroke();
+  }
+  for (let j = 0; j < 5; j++) {
+    const yy = C.GROUND_Y + 14 + j*j*11;
+    ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(CFG.W, yy); ctx.stroke();
+  }
+  // 场地装饰：气泡 / 书页 / 星点
+  const deco = arena.deco || 'bubble';
+  ctx.fillStyle = rgba(arena.grid, .35);
+  for (let i = 0; i < 22; i++) {
+    const px = (i * 137 + S.t * (deco === 'bubble' ? -0.4 : 0.18)) % CFG.W;
+    const py = (i * 83 + Math.sin(S.t/60 + i)*14) % (C.GROUND_Y - 40);
+    ctx.beginPath(); ctx.arc(px, py, 2 + i % 4, 0, 7); ctx.fill();
+  }
+  if (S.orb) { ctx.fillStyle = '#8cebc8'; ctx.beginPath(); ctx.arc(S.orb.x, S.orb.y, 14, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(140,235,200,.6)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(S.orb.x, S.orb.y, 22, 0, 7); ctx.stroke(); }
+  // 特效环
+  S.fx.forEach(e => { ctx.strokeStyle = rgba(e.col, Math.max(0, e.t/e.max)); ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (1.2 - e.t/e.max*0.6), 0, 7); ctx.stroke(); });
+  // 投射物
+  S.proj.forEach(p => { ctx.fillStyle = rgb(p.col || [255,255,255]); ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius || 16, 0, 7); ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.lineWidth=2; ctx.stroke(); });
+  // 角色
+  S.f.forEach(f => { if (f) drawFighter(f); });
+  // 粒子
+  S.particles.forEach(p => { ctx.fillStyle = rgba(p.col, Math.max(0, p.t/30)); ctx.fillRect(p.x, p.y, 3, 3); });
+  // 浮字
+  S.floats.forEach(e => { ctx.font = 'bold 22px system-ui,sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = rgba(e.col, Math.max(0, e.t/46)); ctx.fillText(e.text, e.x, e.y); });
+  // 暂停 / 结束遮罩由 DOM 弹层承担，这里只画一层淡色
+  ctx.setTransform(1,0,0,1,0,0);
+  if (S.paused) { ctx.fillStyle='rgba(8,11,26,.55)'; ctx.fillRect(0,0,cv.width,cv.height); }
+}
+
+// ======================== HUD / 按钮状态 ========================
+const ACT_LABEL = { atk:'普攻', s1:'技1', s2:'技2', s3:'技3', ult:'奥义',
+  jump:'跳', dodge:'闪避', cleanse:'净化', scroll:'秘卷' };
+function updateHUD() {
+  const a = S.f[0], b = S.f[1]; if (!a || !b) return;
+  $('#n1').textContent = 'P1 · ' + a.ch.short;
+  $('#n2').textContent = (S.mode === 'online' ? '对手 · ' : '电脑 · ') + b.ch.short;
+  $('#hp1').style.width = (a.hp/a.maxHp*100) + '%';
+  $('#hp2').style.width = (b.hp/b.maxHp*100) + '%';
+  [a,b].forEach((f,i)=>{
+    const bars = $$('#rg'+(i+1)+' b');
+    bars.forEach((el,j)=>el.classList.toggle('on', f.rage >= (j+1)*C.RAGE_PER_GRID - 10));
+  });
+  $('#clock').textContent = Math.ceil(S.timeLeft);
+  $('#meta').textContent = (S.mode==='online'?'联网 1v1':'单人 PVE') + ' · ' +
+    (RULES.arenas[S.arenaIdx].name) + ' · ' + (RULES.arena_effects[S.effect].name) + ' · ' + S.scrollName;
+  const kit = kitOf(a.cid);
+  $('#skillbar').innerHTML = ['s1','s2','s3','ult'].map(s =>
+    '<b>'+ACT_LABEL[s]+'</b> '+spec(a.cid,s).name).join('　') +
+    '　|　联动 <b>'+kit.link_from+'→'+kit.link_to+'</b>：'+kit.link_desc;
+  // 圆键 / 胶囊：名称 + CD + 气不足
+  $$('#keys .rk, #funcs .cap').forEach(el => {
+    const ac = el.dataset.act; if (!ac) return;
+    const f = a;
+    let cd = 0, need = 0;
+    if (ac === 'dodge') cd = f.dodgeCd;
+    else if (ac === 'cleanse') cd = f.cleanseCd;
+    else if (ac === 'scroll') cd = f.scrollCd;
+    else if (ac === 'atk') cd = f.cd.atk;
+    else if (ac !== 'jump') { cd = f.cd[ac] || 0; need = spec(f.cid, ac).rage || 0; }
+    const lack = need > 0 && f.rage < need;
+    el.classList.toggle('cd', cd > 0 || lack);
+    const num = el.querySelector('.cdnum');
+    if (num) num.textContent = cd > 0 ? (cd/CFG.FPS).toFixed(1) : (lack ? '缺气' : '');
+    // 大字 = 角色专属短名（白饭 / 飞弹 / 鲸尾…），小字 = 键盘键名
+    const lab = el.querySelector('.lab');
+    if (lab && (ac === 's1' || ac === 's2' || ac === 's3')) lab.textContent = shortName(f.cid, ac);
+    const small = el.querySelector('small');
+    if (small) small.textContent =
+      ({s1:'U',s2:'I',s3:'O',ult:'L',atk:'J',jump:'K',dodge:'Q',cleanse:'E',scroll:'Z'})[ac] || '';
+  });
+}
+
+// ======================== 输入：DOM 指针 + 键盘 ========================
+function bindPress(el, fn) {
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault(); el.classList.add('hot');
+    try { el.setPointerCapture(e.pointerId); } catch (x) {}
+    fn(e);
+  });
+  const off = e => { el.classList.remove('hot'); };
+  el.addEventListener('pointerup', off);
+  el.addEventListener('pointercancel', off);
+  el.addEventListener('lostpointercapture', off);
+}
+$$('#keys .rk, #funcs .cap').forEach(el => bindPress(el, () => act(1, el.dataset.act)));
+
+// 固定摇杆：底盘不动，只有头跟手指；多指互不干扰
+const pad = $('#pad'), knob = $('#knob');
+let stickId = null;
+function stickMove(e) {
+  const r = pad.getBoundingClientRect();
+  const cx = r.left + r.width/2, cy = r.top + r.height/2;
+  let dx = (e.clientX - cx) / (r.width/2), dy = (e.clientY - cy) / (r.height/2);
+  const len = Math.hypot(dx, dy); if (len > 1) { dx /= len; dy /= len; }
+  knob.style.left = (50 + dx * 30) + '%'; knob.style.top = (50 + dy * 30) + '%';
+  S.input.dir = Math.abs(dx) < CFG.STICK_DEAD ? 0 : (dx > 0 ? 1 : -1);
+  S.input.up = dy < -0.6; S.input.down = dy > 0.6;
+  if (S.mode === 'online' && S.net.open && S.net.role === 'guest') netSend({ k: 'dir', d: S.input.dir });
+}
+pad.addEventListener('pointerdown', e => {
+  e.preventDefault(); stickId = e.pointerId;
+  try { pad.setPointerCapture(e.pointerId); } catch (x) {}
+  stickMove(e);
+});
+pad.addEventListener('pointermove', e => { if (e.pointerId === stickId) stickMove(e); });
+function stickEnd(e) {
+  if (e.pointerId !== stickId) return;
+  stickId = null; S.input.dir = 0; S.input.up = S.input.down = false;
+  knob.style.left = '50%'; knob.style.top = '50%';
+  if (S.mode === 'online' && S.net.open && S.net.role === 'guest') netSend({ k:'dir', d:0 });
+}
+pad.addEventListener('pointerup', stickEnd);
+pad.addEventListener('pointercancel', stickEnd);
+pad.addEventListener('lostpointercapture', stickEnd);
+
+// 键盘：电脑调试 / 外接键盘（4399 习惯），不影响手机 DOM 按键
+const KEY1 = { j:'atk', k:'jump', u:'s1', i:'s2', o:'s3', l:'ult', q:'dodge', e:'cleanse', z:'scroll' };
+const KEY2 = { '1':'atk','2':'jump','4':'s1','5':'s2','6':'s3','3':'ult','7':'dodge','8':'cleanse','9':'scroll' };
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'escape') { toggleOverlay('ovMenu'); return; }
+  if (k === 'p') { togglePause(); return; }
+  if (S.scene !== 'game') return;
+  if (KEY1[k]) { act(1, KEY1[k]); e.preventDefault(); }
+  if (KEY2[k]) { act(2, KEY2[k]); e.preventDefault(); }
+  if (k === 'a') S.input.dir = -1;
+  if (k === 'd') S.input.dir = 1;
+  if (k === 's') S.input.down = true;
+  if (k === 'w') S.input.up = true;
+});
+window.addEventListener('keyup', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'a' || k === 'd') S.input.dir = 0;
+  if (k === 's') S.input.down = false;
+  if (k === 'w') S.input.up = false;
+});
+
+// ======================== 房间码联网（WebRTC DataChannel） ========================
+/* 同步方案：host 跑权威模拟，每 2 帧把双方快照发给 guest；
+   guest 只上行输入、渲染下发状态。两台手机各显示各的屏幕，
+   不再把 P1/P2 两套按键挤在同一块屏上。 */
+function netSend(o) {
+  const dc = S.net.dc;
+  if (dc && dc.readyState === 'open') { try { dc.send(JSON.stringify(o)); } catch (e) {} }
+}
+function netStatus(txt) { const el = $('#netStatus'); if (el) el.textContent = txt; }
+function pcMake() {
+  const pc = new RTCPeerConnection({ iceServers: CFG.ICE[0].iceServers });
+  return pc;
+}
+async function waitIce(pc) {
+  if (pc.iceGatheringState === 'complete') return;
+  await new Promise(res => {
+    const chk = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', chk); res(); } };
+    pc.addEventListener('icegatheringstatechange', chk);
+    setTimeout(res, 6000);   // 兜底：某些网络下 gathering 很慢
+  });
+}
+function wireDC(dc) {
+  S.net.dc = dc;
+  dc.onopen = () => {
+    S.net.open = true; netStatus('已连接 · ' + S.net.role + ' · 房间 ' + S.net.room);
+    toast('联机成功，开打！'); startMatch();
+    if (S.net.role === 'guest') netSend({ k: 'char', cid: RULES.characters[S.charIdx].id });
+  };
+  dc.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (S.net.role === 'guest' && m.k === 'snap') {
+      applySnapshot(m.s);
+      if (m.s.over && $('#ovOver').hidden) showOver(m.s.w);
+    }
+    else if (S.net.role === 'host' && m.k === 'in') doAct(S.f[1], m.a);
+    else if (S.net.role === 'host' && m.k === 'dir') S.net.remoteDir = m.d;
+    else if (S.net.role === 'host' && m.k === 'char') {
+      // 客人自选角色：换掉房主这边的 P2（血量按比例保持）
+      const ch = RULES.characters.find(c => c.id === m.cid);
+      if (ch && S.f[1]) {
+        const r = S.f[1].hp / S.f[1].maxHp;
+        S.f[1].cid = ch.id; S.f[1].ch = ch;
+        S.f[1].maxHp = C.BASE_HP * (ch.stats.hp || 1);
+        S.f[1].hp = S.f[1].maxHp * r;
+      }
+    }
+  };
+  dc.onclose = () => { S.net.open = false; netStatus('连接断开'); toast('对手断开'); };
+}
+function signalSend(o) {
+  if (S.net.ws && S.net.ws.readyState === 1) S.net.ws.send(JSON.stringify(o));
+  else { S.net.buf.push(o); $('#sdpOut').value = JSON.stringify(o); }
+}
+function wsConnect(code, role) {
+  if (!CFG.WORKER_URL) { netStatus('未配置信令 → 用下方「本机码 / 对方码」手动交换'); return; }
+  const base = CFG.WORKER_URL.replace(/^http/, 'ws').replace(/\/$/, '');
+  const ws = new WebSocket(base + '/ws?room=' + encodeURIComponent(code) + '&role=' + role);
+  S.net.ws = ws;
+  ws.onmessage = async e => {
+    let m; try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (m.t === 'peer' && role === 'host') { netStatus('对手加入，正在建连…'); await hostOffer(); }
+    if ((m.t === 'offer' || m.t === 'answer') && m.d) await netApply(m);
+  };
+  ws.onopen = () => { netStatus('信令已连接 · 房间 ' + code + ' · 等待对手');
+    S.net.buf.splice(0).forEach(o => ws.send(JSON.stringify(o))); };
+  ws.onerror = () => netStatus('信令连不上，请检查 WORKER_URL 或用手动交换');
+}
+async function hostOffer() {
+  const pc = pcMake(); S.net.pc = pc;
+  const dc = pc.createDataChannel('aimf'); wireDC(dc);
+  const off = await pc.createOffer(); await pc.setLocalDescription(off); await waitIce(pc);
+  const payload = { t:'offer', d: pc.localDescription, room:S.net.room, from:'host' };
+  signalSend(payload); $('#sdpOut').value = JSON.stringify(payload);
+  netStatus('已发送本机码，等对方应答');
+}
+async function netApply(m) {
+  let pc = S.net.pc;
+  if (!pc) { pc = pcMake(); S.net.pc = pc;
+    pc.ondatachannel = e => wireDC(e.channel); }
+  if (m.t === 'offer') {
+    await pc.setRemoteDescription(m.d);
+    const ans = await pc.createAnswer(); await pc.setLocalDescription(ans); await waitIce(pc);
+    const payload = { t:'answer', d: pc.localDescription, room:S.net.room, from:'guest' };
+    signalSend(payload); $('#sdpOut').value = JSON.stringify(payload);
+    netStatus('已回应对手，正在打通…');
+  } else {
+    await pc.setRemoteDescription(m.d); netStatus('应答已应用，正在打通…');
+  }
+}
+function roomCode() {
+  const s = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let r = ''; for (let i = 0; i < 4; i++) r += s[Math.floor(Math.random()*s.length)];
+  return r;
+}
+$('#btnHost').addEventListener('click', () => {
+  S.net.role = 'host'; S.net.room = ($('#roomCode').value || roomCode()).toUpperCase();
+  $('#roomCode').value = S.net.room;
+  S.mode = 'online'; S.net.remoteDir = 0;
+  netStatus('房间 ' + S.net.room + ' 已创建，把房间码发给对手');
+  if (CFG.WORKER_URL) wsConnect(S.net.room, 'host');
+  else { hostOffer(); netStatus('未配置信令：把下方「本机码」发给对手，再把「对方码」粘回来'); }
+  toast('房间 ' + S.net.room);
+});
+$('#btnJoin').addEventListener('click', () => {
+  const c = ($('#roomCode').value || '').trim().toUpperCase();
+  if (c.length < 4) { toast('请输入 4 位房间码'); return; }
+  S.net.role = 'guest'; S.net.room = c; S.mode = 'online';
+  netStatus('加入房间 ' + c + '，等待主机…');
+  if (CFG.WORKER_URL) wsConnect(c, 'guest');
+  else netStatus('未配置信令：把房主的「本机码」粘进下方框，点「应用对方码」');
+});
+$('#btnSdp').addEventListener('click', async () => {
+  try {
+    const m = JSON.parse($('#sdpIn').value.trim());
+    if (!m.d) { toast('对方码格式不对'); return; }
+    if (!S.net.role) S.net.role = m.t === 'offer' ? 'guest' : 'host';
+    await netApply(m);
+    if (m.t === 'offer') { /* netApply 已生成 answer 并写进 sdpOut */ }
+    toast('已应用对方码');
+  } catch (e) { toast('解析失败：' + e.message); }
+});
+function netDisconnect() {
+  try { if (S.net.dc) S.net.dc.close(); } catch(e){}
+  try { if (S.net.pc) S.net.pc.close(); } catch(e){}
+  try { if (S.net.ws) S.net.ws.close(); } catch(e){}
+  S.net = { role:'', room:'', ws:null, pc:null, dc:null, open:false, buf:[] };
+}
+
+// ======================== 页面 / 弹层 ========================
+// 兼容两种写法：'ovMenu' 与 '#ovMenu' 都能用（startMatch 里传的是不带 # 的）
+const ovEl = id => document.querySelector(id.charAt(0) === '#' ? id : '#' + id);
+function show(id) { ovEl(id).hidden = false; }
+function hide(id) { ovEl(id).hidden = true; }
+function toggleOverlay(id) {
+  const el = ovEl(id); el.hidden = !el.hidden;
+  if (!el.hidden && (id === 'ovStats' || id === '#ovStats')) renderStats();
+}
+$$('[data-close]').forEach(b => b.addEventListener('click', () => hide('#' + b.dataset.close)));
+$$('.ov').forEach(o => o.addEventListener('pointerdown', e => { if (e.target === o && o.id !== 'ovOver') o.hidden = true; }));
+
+function buildChips() {
+  const cr = $('#charRow'); cr.innerHTML = '';
+  RULES.characters.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (i === S.charIdx ? ' on' : '');
+    b.textContent = c.short; b.dataset.i = i;
+    b.addEventListener('click', () => { S.charIdx = i; buildChips(); });
+    cr.appendChild(b);
+  });
+  $('#charName').textContent = '· ' + RULES.characters[S.charIdx].name + ' — ' + RULES.characters[S.charIdx].lore;
+  const ar = $('#arenaRow'); ar.innerHTML = '';
+  RULES.arenas.forEach((a, i) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (i === S.arenaIdx ? ' on' : '');
+    b.textContent = a.name; b.title = a.desc;
+    b.addEventListener('click', () => { S.arenaIdx = i; buildChips(); });
+    ar.appendChild(b);
+  });
+  const er = $('#effRow'); er.innerHTML = '';
+  Object.keys(RULES.arena_effects).forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (k === S.effect ? ' on' : '');
+    b.textContent = RULES.arena_effects[k].name; b.title = RULES.arena_effects[k].desc;
+    b.addEventListener('click', () => { S.effect = k; buildChips(); });
+    er.appendChild(b);
+  });
+  const sr = $('#scrollRow'); sr.innerHTML = '';
+  Object.keys(RULES.scrolls).forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (k === S.scrollName ? ' on' : '');
+    b.textContent = k; b.title = RULES.scrolls[k].desc;
+    b.addEventListener('click', () => { S.scrollName = k; buildChips(); });
+    sr.appendChild(b);
+  });
+  $('#menuHint').innerHTML = '当前：<b>' + (S.mode === 'online' ? '联网 1v1' : '单人 PVE') + '</b> · ' +
+    RULES.arenas[S.arenaIdx].name + ' · ' + RULES.arena_effects[S.effect].name + ' · 秘卷 ' + S.scrollName +
+    '<br>手机版默认只显示 P1 一套按键；P2 由电脑或远端玩家控制，不再同屏挤两套。';
+}
+$$('#modeRow .chip').forEach(b => b.addEventListener('click', () => {
+  $$('#modeRow .chip').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); S.mode = b.dataset.mode;
+  if (S.mode === 'online') show('#ovNet');
+  buildChips();
+}));
+function renderHelp() {
+  const kit = kitOf(RULES.characters[S.charIdx].id);
+  const names = ['s1','s2','s3','ult'].map(s => spec(RULES.characters[S.charIdx].id, s).name);
+  $('#helpBody').innerHTML =
+    '<b>手机操作</b><br>左下固定摇杆＝左右移动（上＝上挑修饰，下＝防御）；' +
+    '右下大圆＝普攻，3 个圆＝角色专属技能，金色圆＝奥义；' +
+    '左下 2×2 胶囊＝跳 / 闪避 / 净化 / 秘卷。所有按键按真实手机像素绘制，不再从电脑布局缩小。<br><br>' +
+    '<b>' + RULES.characters[S.charIdx].short + ' 的四个技能</b><br>' +
+    names.map((n,i)=>(['技1','技2','技3','奥义'][i])+'　'+n).join('<br>') +
+    '<br>联动 <b>' + kit.link_from + ' → ' + kit.link_to + '</b>：' + kit.link_desc + '<br><br>' +
+    '<b>键盘（电脑调试 / 外接键盘）</b><br>P1：A/D 移动，W 上挑，S 防御，J 普攻，K 跳，U/I/O 技1~3，L 奥义，Q 闪避，E 净化，Z 秘卷，P 暂停，Esc 菜单。<br>' +
+    'P2：数字 1/2 攻跳，4/5/6 技，3 奥义，7/8/9 功能，方向键移动。<br><br>' +
+    '<b>规则</b><br>每格气 100，奥义耗 2 格且 CD 长；闪避 CD 约 ' + (C.DODGE_CD/CFG.FPS).toFixed(1) +
+    ' 秒、有无敌帧，专门躲技能；净化解控并短时免控；秘卷在菜单里换。' +
+    '地面不能穿过对手，跳起来可越过绕背。PVE 电脑会靠近、放远程技、贴脸连招、被控净化。<br><br>' +
+    '<b>联网</b><br>菜单 → 房间码联机：一人「创建房间」，另一人输同一房间码「加入」。' +
+    '两台手机各管各的角色，不再同屏。部署 Cloudflare Worker 后自动连；没部署就把「本机码」发给对方、粘回「对方码」。<br><br>' +
+    '<b>右上角</b>「暂停 / 菜单」收起了原来挤在屏幕中间的 5 个按钮；菜单里可换角色、场地、机制、秘卷、看战绩。';
+}
+function renderStats() {
+  const st = S.stats, box = $('#statsBody');
+  box.innerHTML = ['P1','P2'].map(k => {
+    const s = st[k], rate = s.matches ? Math.round(s.wins/s.matches*100) : 0;
+    const top = Object.entries(s.chars).sort((a,b)=>b[1]-a[1])[0];
+    const cn = top ? (RULES.characters.find(c=>c.id===top[0])||{short:top[0]}).short : '—';
+    return '<h2>'+k+'</h2>对局 <b>'+s.matches+'</b> 场 · 胜 <b>'+s.wins+'</b> 场 · 胜率 <b>'+rate+'%</b><br>' +
+      '累计伤害 <b>'+s.dmg+'</b> · 最大连击 <b>'+s.maxCombo+'</b> · 常用角色 <b>'+cn+'</b><br>' +
+      '最近：' + (s.recent.length ? s.recent.slice(0,5).map(r=> (r.w===Number(k.slice(1))?'胜':'负')).join(' / ') : '暂无');
+  }).join('');
+}
+function showOver(w) {
+  $('#overTitle').textContent = w === 0 ? '平局' : (w === 1 ? 'P1 胜利' : 'P2 胜利');
+  $('#overSub').textContent = (S.mode === 'online' ? '联网 1v1' : '单人 PVE') + ' · ' +
+    RULES.arenas[S.arenaIdx].name + ' · 用时 ' + Math.round(CFG.ROUND_SEC - S.timeLeft) + ' 秒';
+  show('#ovOver');
+}
+function startMatch() {
+  ['ovMenu','ovHelp','ovNet','ovStats','ovOver'].forEach(hide);
+  const c1 = RULES.characters[S.charIdx].id;
+  let c2 = RULES.characters[S.p2CharIdx].id;
+  if (S.mode === 'online' && S.net.role === 'guest') c2 = RULES.characters[0].id;
+  S.f = [ makeF(1, c1, CFG.W * 0.28), makeF(2, c2, CFG.W * 0.72) ];
+  S.proj = []; S.fx = []; S.floats = []; S.particles = [];
+  S.t = 0; S.timeLeft = CFG.ROUND_SEC; S.over = false; S.winner = 0;
+  S.paused = false; S.aiTick = 0; S.aiCache = { held:0, acts:[] };
+  S.orb = null; S.prevD = undefined; S.netEvents = [];
+  S.input.dir = 0; S.input.up = S.input.down = false;
+  S.scene = 'game';
+  $('#btnPause').textContent = '暂停';
+  toast(S.mode === 'online' ? '联网对局开始' : '开打！');
+}
+function togglePause() {
+  if (S.scene !== 'game') return;
+  S.paused = !S.paused;
+  $('#btnPause').textContent = S.paused ? '继续' : '暂停';
+  toast(S.paused ? '已暂停' : '继续');
+}
+$('#btnStart').addEventListener('click', () => { S.mode = 'solo'; netDisconnect(); startMatch(); });
+$('#btnNet').addEventListener('click', () => { show('#ovNet'); });
+$('#btnPause').addEventListener('click', togglePause);
+$('#btnMenu').addEventListener('click', () => { toggleOverlay('ovMenu'); buildChips(); });
+$('#btnHelp').addEventListener('click', () => { renderHelp(); show('#ovHelp'); });
+$('#btnStats').addEventListener('click', () => { renderStats(); show('#ovStats'); });
+$('#btnClear').addEventListener('click', () => {
+  if (!confirm('确定清空 P1 / P2 全部战绩？')) return;
+  S.stats = { P1: blankSide(), P2: blankSide() }; saveStats(); renderStats(); toast('战绩已清空');
+});
+$('#btnAgain').addEventListener('click', startMatch);
+$('#btnBack').addEventListener('click', () => {
+  S.scene = 'menu'; hide('#ovOver'); netDisconnect(); show('#ovMenu'); buildChips();
+});
+
+// ======================== 主循环 ========================
+let acc = 0, last = now();
+function loop(ts) {
+  const dt = Math.min(100, ts - last); last = ts; acc += dt;
+  const stepMs = 1000 / CFG.FPS;
+  let guard = 0;
+  while (acc >= stepMs && guard++ < 5) { step(); acc -= stepMs; }
+  if (S.f[0]) { draw(); updateHUD(); }
+  requestAnimationFrame(loop);
+}
+
+// ======================== 启动 ========================
+S.stats = loadStats();
+resize();
+buildChips();
+S.f = [ makeF(1, RULES.characters[0].id, CFG.W*0.28), makeF(2, RULES.characters[1].id, CFG.W*0.72) ];
+show('#ovMenu');
+requestAnimationFrame(loop);
+
+// 调试 / 自动化验收接口
+window.__aimf = {
+  S: S, C: C, CFG: CFG, RULES: RULES,
+  act: act, doAct: doAct, step: step, startMatch: startMatch,
+  snapshot: snapshot, applySnapshot: applySnapshot,
+  netSend: netSend, wireDC: wireDC, netStatus: netStatus,
+  togglePause: togglePause, buildChips: buildChips,
+  help: renderHelp, stats: renderStats,
+};
+})();
+
+</script>
+</body>
+</html>
